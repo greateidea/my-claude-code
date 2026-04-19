@@ -1,4 +1,5 @@
 import { default as OpenAI } from 'openai'
+import type { Message } from '../../state/AppStateStore'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -10,6 +11,8 @@ export interface ChatOptions {
   model?: string
   temperature?: number
   maxTokens?: number
+  stream?: boolean
+  onChunk?: (content: string, reasoning?: string) => void
 }
 
 export interface ChatResponse {
@@ -21,19 +24,30 @@ export interface ChatResponse {
   }
 }
 
-const DEFAULT_MODEL = 'minimaxai/minimax-m2.7'
+const DEFAULT_MODEL = 'qwen/qwen2.5-coder-32b-instruct'
+const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com/v1'
+
+export interface StreamOptions {
+  onChunk?: (content: string, reasoning?: string) => void
+}
 
 export class DeepSeekClient {
   private client: OpenAI
+  public currentMessagesRef: { current: Message[] | null }
 
   constructor(options: { apiKey: string; baseURL?: string }) {
     this.client = new OpenAI({
       apiKey: options.apiKey,
-      baseURL: options.baseURL || 'https://integrate.api.nvidia.com/v1',
+      baseURL: options.baseURL || DEFAULT_BASE_URL,
     })
+    this.currentMessagesRef = { current: null }
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
+    if (options.stream && options.onChunk) {
+      return this.streamChat(options)
+    }
+
     const response = await this.client.chat.completions.create({
       model: options.model || DEFAULT_MODEL,
       messages: options.messages,
@@ -53,6 +67,41 @@ export class DeepSeekClient {
         completionTokens: response.usage.completion_tokens,
         totalTokens: response.usage.total_tokens,
       } : undefined,
+    }
+  }
+
+  private async streamChat(options: ChatOptions): Promise<ChatResponse> {
+    const fullContent: string[] = []
+    const fullReasoning: string[] = []
+
+    const response = await this.client.chat.completions.create({
+      model: options.model || DEFAULT_MODEL,
+      messages: options.messages,
+      temperature: options.temperature,
+      max_tokens: options.maxTokens,
+      stream: true,
+      stream_options: { include_usage: true },
+    })
+
+    for await (const chunk of response) {
+      const delta = chunk.choices[0]?.delta as any
+      const content = delta?.content || ''
+      const reasoning = delta?.reasoning_content || ''
+      
+      if (content) fullContent.push(content)
+      if (reasoning) fullReasoning.push(reasoning)
+      
+      if (content || reasoning) {
+        options.onChunk?.(content, reasoning)
+      }
+    }
+
+    return {
+      message: {
+        role: 'assistant',
+        content: fullContent.join(''),
+      },
+      usage: undefined,
     }
   }
 

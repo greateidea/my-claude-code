@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Box, Text } from 'ink'
 
 interface PromptInputProps {
@@ -9,32 +9,38 @@ interface PromptInputProps {
 export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   const [input, setInput] = useState('')
   const [isTTY, setIsTTY] = useState(false)
-  const [cursorVisible, setCursorVisible] = useState(true)
-
-  // Blinking cursor effect
-  useEffect(() => {
-    if (disabled) return
-    
-    const interval = setInterval(() => {
-      setCursorVisible(v => !v)
-    }, 500)
-
-    return () => clearInterval(interval)
-  }, [disabled])
 
   useEffect(() => {
     setIsTTY(process.stdin.isTTY === true)
   }, [])
+
+  const [cursorChar, setCursorChar] = useState('|')
+  const inputRef = useRef(input)
+
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
+
+  useEffect(() => {
+    if (!isTTY || disabled) return
+
+    const interval = setInterval(() => {
+      setCursorChar(c => c === '|' ? '█' : '|')
+    }, 530)
+
+    return () => clearInterval(interval)
+  }, [isTTY, disabled])
 
   useEffect(() => {
     if (!isTTY || disabled) return
 
     const handleData = (chunk: Buffer) => {
       const char = chunk.toString()
+      const currentInput = inputRef.current
       
       if (char === '\r' || char === '\n') {
-        if (input.trim()) {
-          onSubmit(input)
+        if (currentInput.trim()) {
+          onSubmit(currentInput)
           setInput('')
         }
         return
@@ -51,7 +57,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
       }
       
       if (char.startsWith('\x1b')) {
-        process.exit(0)
+        // 方向键等 escape 序列，忽略而不是退出
         return
       }
       
@@ -76,7 +82,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
         process.stdin.removeListener('data', handleData)
       } catch (e) {}
     }
-  }, [input, isTTY, disabled, onSubmit])
+  }, [isTTY, disabled])
 
   if (!isTTY || disabled) {
     return (
@@ -98,7 +104,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
         <Text color={input ? 'white' : 'gray'}>
           {input || '(type message)...'}
         </Text>
-        {cursorVisible && <Text bold color="white">█</Text>}
+        <Text bold color="white">{cursorChar}</Text>
       </Box>
       <Text dimColor>Press Enter to send, Ctrl+C to exit</Text>
     </Box>
