@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (secret) - 保留 .env 在 git 中，但不应该提交具体 key
+.env
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# Temporary files
+*.tmp
