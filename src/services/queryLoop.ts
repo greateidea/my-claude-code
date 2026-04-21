@@ -26,7 +26,7 @@ export interface QueryResult {
 }
 
 export interface QueryStep {
-  type: 'message' | 'tool' | 'error'
+  type: 'message' | 'tool' | 'error' | 'thinking'
   content?: string
   toolUse?: { name: string; input: Record<string, string> }
   toolResult?: string
@@ -61,7 +61,32 @@ function createToolExecutor(tools: Tool[]) {
   }
 }
 
+const THINKING_REGEX = /<thinking>([\s\S]*?)<\/thinking>/gi
+
+export function extractThinkingContent(content: string): string | null {
+  const match = THINKING_REGEX.exec(content)
+  if (match) {
+    return match[1]?.trim() ?? null
+  }
+  return null
+}
+
+export function stripThinkingContent(content: string): string {
+  return content.replace(THINKING_REGEX, '').trim()
+}
+
 export function buildSystemPrompt(tools: Tool[], basePrompt: string): string {
+  const thinkingInstruction = `
+IMPORTANT: When you need to think through a problem before answering, wrap your reasoning in <thinking> tags:
+
+<thinking>
+Your step-by-step reasoning goes here...
+</thinking>
+
+Then provide your final answer. The thinking will be displayed to help the user understand your process.
+
+`
+
   const toolList = tools.map(t => {
     const params = t.inputSchema
     const paramsStr = Object.entries(params)
@@ -70,10 +95,10 @@ export function buildSystemPrompt(tools: Tool[], basePrompt: string): string {
         return `- ${key}: ${s.description || key}`
       })
       .join('\n')
-    return `${t.description}\nParameters:\n${paramsStr}`
+    return `name:${t.name}\ndescription:${t.description}\nParameters:\n${paramsStr}`
   }).join('\n\n')
   
-  return `${basePrompt}\n\nTools:\n${toolList}`
+  return `${basePrompt}${thinkingInstruction}\n\nTools:\n${toolList}`
 }
 
 export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<QueryStep, QueryResult, unknown> {
@@ -97,12 +122,23 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
     try {
       const response = await config.client.chat({ messages, maxTokens: 1500 })
       
-      const content = response.message.content ?? ''
+      const rawContent = response.message.content ?? ''
+
+      const thinking = extractThinkingContent(rawContent)
+      if (thinking) {
+        yield { type: 'thinking', content: thinking }
+        config.onMessage?.(`[thinking] ${thinking}`, false)
+      }
+
+      const content = stripThinkingContent(rawContent)
       config.onMessage?.(content, false)
       yield { type: 'message', content }
 
       if (content) {
         messages.push({ role: 'assistant', content })
+      } else if (thinking) {
+        // If there's only thinking and no actual content, still store it
+        messages.push({ role: 'assistant', content: rawContent })
       }
 
       const toolCalls = findToolCalls(content)
