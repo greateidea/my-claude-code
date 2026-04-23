@@ -36,11 +36,9 @@ export interface QueryStep {
 export function findToolCalls(content: string): { name: string; input: Record<string, string> }[] {
   const results: { name: string; input: Record<string, string> }[] = []
   
-  // 两种格式都支持:
-  // 1. <tool name="calculate"><param name="expression">1+2</param></tool>
-  // 2. <tool_call>calculate{"expression":"1+2"}</tool_call>
+  // 只解析 prompt 格式（当没有 openaiTools 时使用）
+  // 如果有 openaiTools，应该使用 API 返回的 toolCalls，不是这个
   
-  // 格式 1
   const toolRegex1 = /<tool name="(\w+)">([\s\S]*?)<\/tool>/g
   let match
   while ((match = toolRegex1.exec(content)) !== null) {
@@ -55,7 +53,6 @@ export function findToolCalls(content: string): { name: string; input: Record<st
     results.push({ name, input })
   }
   
-  // 格式 2: <tool_call>toolName{...}</tool_call> 或 <tool_call>\ntoolName\n{...}\n</tool_call>
   const toolRegex2 = /<tool_call>\s*(\w+)\s*\{([^}]+)\}\s*<\/tool_call>/g
   while ((match = toolRegex2.exec(content)) !== null) {
     const name = match[1]
@@ -63,9 +60,7 @@ export function findToolCalls(content: string): { name: string; input: Record<st
     try {
       const input = JSON.parse(jsonStr)
       results.push({ name, input })
-    } catch {
-      // skip invalid JSON
-    }
+    } catch {}
   }
   
   return results
@@ -184,11 +179,11 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       if (content) {
         messages.push({ role: 'assistant', content })
       } else if (thinking) {
-        // If there's only thinking and no actual content, still store it
         messages.push({ role: 'assistant', content: rawContent })
       }
 
-      const toolCalls = findToolCalls(content)
+      // 只有在没有 openaiTools 时才解析 prompt 格式的工具调用
+      const toolCalls = !config.openaiTools ? findToolCalls(content) : []
       
       if (toolCalls.length === 0) {
         return { reason: 'completed', turnCount }
