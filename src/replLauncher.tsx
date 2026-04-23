@@ -23,22 +23,29 @@ const DEFAULT_TOOLS: Tool[] = [
 
 const BASE_PROMPT = `You are a helpful AI assistant. You have a "calculate" tool for math.
 
-Rules:
-- Use calculate tool for math problems when needed
-- You can also answer directly without tools
+STRICT Rules:
+1. You MUST use <thinking> tags for ALL reasoning
+2. You MUST call calculate tool for math problems
+3. Never calculate in your head
 
-When thinking, use <thinking> tags:
+Use this format ALWAYS:
+
+First, your thinking:
 <thinking>
-Your reasoning...
+Step 1: 1+5*2 = 1+10 = 11
+Step 2: 5*20/10 = 100/10 = 10
+Step 3: 10*50 = 500
+Step 4: 100*2 = 200
+Step 5: 11 + 10 - 500 + 200 = -279
 </thinking>
 
-Tool call format (optional):
+Then, call the tool:
 <tool_call>
 <tool name="calculate">
-<param name="expression">3+3</param>
+<param name="expression">1+5*2+5*20/10-10*50+100*2</param>
 </tool_call>
 
-Important: Output your answer in normal text, not just tool calls.`
+Finally, give the answer based on tool result.`
 
 function cleanContent(content: string): string {
   // 去除 XML 标签（只在最终存储时）
