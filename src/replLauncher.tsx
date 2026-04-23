@@ -24,32 +24,25 @@ const DEFAULT_TOOLS: Tool[] = [
 const BASE_PROMPT = `You are a helpful AI assistant. You have a "calculate" tool for math.
 
 Rules:
-- ALWAYS use calculate tool for ANY math problem  
-- NEVER calculate in your head - always use the tool
-- Output ONLY the tool call, nothing else
+- Use calculate tool for math problems when needed
+- You can also answer directly without tools
 
-When you need to think through a problem, use <thinking> tags to show your reasoning:
+When thinking, use <thinking> tags:
 <thinking>
-Step-by-step reasoning...
+Your reasoning...
 </thinking>
 
-Tool call format:
+Tool call format (optional):
 <tool_call>
 <tool name="calculate">
 <param name="expression">3+3</param>
-</tool_call>`
+</tool_call>
+
+Important: Output your answer in normal text, not just tool calls.`
 
 function cleanContent(content: string): string {
-  const lines = content.split('\n')
-  const uniqueLines: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (line && (uniqueLines.length === 0 || line !== uniqueLines[uniqueLines.length - 1])) {
-      uniqueLines.push(line)
-    }
-  }
-  
-  return uniqueLines.join('\n')
+  // 去除 XML 标签（只在最终存储时）
+  return content
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
     .replace(/<tool name="[^"]*">[\s\S]*?<\/tool>/g, '')
     .replace(/<param name="([^"]+)">([^<]+)<\/param>/g, '$2 ')
@@ -128,24 +121,45 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
           fullContent += step.content + '\n'
         } else if (step.type === 'tool') {
           setCurrentTool(step.toolUse?.name || null)
-          if (step.toolResult) {
-            toolMessages.push({
-              id: Date.now().toString() + Math.random(),
-              type: 'tool' as const,
-              content: `[${step.toolUse?.name}: ${step.toolResult}]`,
-              timestamp: Date.now()
-            })
+        if (step.toolResult) {
+          toolMessages.push({
+            id: Date.now().toString() + Math.random(),
+            type: 'tool' as const,
+            content: `[${step.toolUse?.name}: ${step.toolResult}]`,
+            timestamp: Date.now()
+          })
+          
+          // 更新完整内容（包含工具调用和结果）
+          if (step.toolUse) {
+            fullContent += `\n[Tool: ${step.toolUse.name} = ${step.toolResult}]`
           }
         }
+      } else if (step.type === 'message' && step.content) {
+        fullContent += step.content + '\n'
+      }
       }
       
       setThinkingContent('')
       setCurrentTool(null)
 
+      // 如果没有 assistant 内容但有 tool 结果，使用 tool 结果作为回复
+      const finalContent = fullContent.trim() || (toolMessages.length > 0 
+        ? toolMessages.map(m => m.content).join('\n') 
+        : '')
+      
+      if (!finalContent) {
+        // 没有内容，直接返回，不添加空消息
+        setState((prev: any) => ({
+          ...prev,
+          messages: [...prev.messages, ...toolMessages],
+        }))
+        return
+      }
+      
       const assistantMessage = { 
         id: Date.now().toString(), 
         type: 'assistant' as const, 
-        content: cleanContent(fullContent), 
+        content: cleanContent(finalContent), 
         timestamp: Date.now() 
       }
       
