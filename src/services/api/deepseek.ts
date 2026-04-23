@@ -24,7 +24,7 @@ export interface ChatResponse {
   }
 }
 
-const DEFAULT_MODEL = 'qwen/qwen2.5-coder-32b-instruct'
+const DEFAULT_MODEL = 'qwen/qwen3-next-80b-a3b-thinking'
 const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com/v1'
 
 export interface StreamOptions {
@@ -39,6 +39,8 @@ export class DeepSeekClient {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL || DEFAULT_BASE_URL,
+      maxRetries: 1,
+      timeout: 30000, // 30 second timeout
     })
     this.currentMessagesRef = { current: null }
   }

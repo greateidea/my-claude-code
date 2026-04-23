@@ -40,12 +40,25 @@ Tool call format:
 </tool_call>`
 
 function cleanContent(content: string): string {
-  return content
+  // 1. 去除重复行（相邻且相同的行）
+  const lines = content.split('\n')
+  const uniqueLines: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    // 跳过空行和完全重复的行
+    if (line && (uniqueLines.length === 0 || line !== uniqueLines[uniqueLines.length - 1]) {
+      uniqueLines.push(line)
+    }
+  }
+  
+  const deduplicated = uniqueLines.join('\n')
+  
+  // 2. 去除 XML 标签
+  return deduplicated
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
     .replace(/<tool name="[^"]*">[\s\S]*?<\/tool>/g, '')
     .replace(/<param name="([^"]+)">([^<]+)<\/param>/g, '$2 ')
-    .replace(/^\s+/gm, '')
-    .replace(/^\s+$/gm, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
     .trim()
 }
 
@@ -108,13 +121,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         systemPrompt: SYSTEM_PROMPT,
         maxTurns: 5,
         initialMessages: conversationHistory,
-        onMessage: (content, isToolResult) => {
-          if (isToolResult) {
-            setStreamingContent(prev => prev + '\n' + content + '\n')
-          } else if (content) {
-            setStreamingContent(prev => prev + content)
-          }
-        },
+        onMessage: () => {},  // 不使用 onMessage，避免重复
       })
 
       let stepCount = 0
