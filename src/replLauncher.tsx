@@ -39,7 +39,9 @@ const DEFAULT_TOOLS: Tool[] = [
 // 转换为官方 API 格式
 const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 
-const BASE_PROMPT = `You are a helpful AI assistant. Use the calculate tool for math problems.`
+const BASE_PROMPT = `You are a helpful AI assistant. You have access to a "calculate" tool that can evaluate math expressions.
+IMPORTANT: When a math problem is given, ALWAYS use the calculate tool. Do NOT calculate manually or provide step-by-step reasoning in your response.
+Just call the tool and return the result.`
 
 function cleanContent(content: string): string {
   return content.trim()
