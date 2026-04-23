@@ -41,20 +41,18 @@ const DEFAULT_TOOLS: Tool[] = [
 // 转换为官方 API 格式
 const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 
-const BASE_PROMPT = `You are a helpful AI assistant with tools to help with tasks.
+const BASE_PROMPT = `You are a CLI assistant. Use the tools provided.
 
-Available tools:
-- calculate: Evaluate math expressions
-- bash: Execute shell commands  
-- Read: Read file contents
-- Write: Write content to files
-- Glob: Search for files by pattern
+Tools:
+1. bash(command: string) - Run shell commands. Example: bash("ls -la")
+2. Glob(pattern: string) - Find files. Example: Glob("*.ts")  
+3. Read(file_path: string) - Read a file. Example: Read("file.txt")
+4. Write(file_path: string, content: string) - Write a file.
 
-IMPORTANT: 
-- Use tools for file operations, NOT manual answers
-- Use bash for running commands
-- Use Read to view files before editing
-- Use Write to create files`
+RULES:
+- IMMEDIATELY call a tool without explaining
+- Do NOT manually list files - use bash or Glob
+- Do NOT explain what commands do - just execute them`
 
 function cleanContent(content: string): string {
   return content.trim()

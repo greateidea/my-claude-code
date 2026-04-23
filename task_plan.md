@@ -55,11 +55,11 @@
 
 ---
 
-### Phase 9: 基础工具集
-- [ ] BashTool (执行命令)
-- [ ] FileReadTool (读取文件)
-- [ ] FileWriteTool (写入文件)
-- [ ] GlobTool (文件搜索)
+### Phase 9: 基础工具集 ✅ COMPLETED
+- [x] BashTool (执行命令)
+- [x] FileReadTool (读取文件)
+- [x] FileWriteTool (写入文件)
+- [x] GlobTool (文件搜索)
 
 ### Phase 10: 工具权限机制
 - [ ] 工具权限确认 UI
