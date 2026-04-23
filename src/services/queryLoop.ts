@@ -34,9 +34,15 @@ export interface QueryStep {
 
 export function findToolCalls(content: string): { name: string; input: Record<string, string> }[] {
   const results: { name: string; input: Record<string, string> }[] = []
-  const toolRegex = /<tool name="(\w+)">([\s\S]*?)<\/tool>/g
+  
+  // 两种格式都支持:
+  // 1. <tool name="calculate"><param name="expression">1+2</param></tool>
+  // 2. <tool_call>calculate{"expression":"1+2"}</tool_call>
+  
+  // 格式 1
+  const toolRegex1 = /<tool name="(\w+)">([\s\S]*?)<\/tool>/g
   let match
-  while ((match = toolRegex.exec(content)) !== null) {
+  while ((match = toolRegex1.exec(content)) !== null) {
     const name = match[1]
     const body = match[2]
     const input: Record<string, string> = {}
@@ -47,6 +53,20 @@ export function findToolCalls(content: string): { name: string; input: Record<st
     }
     results.push({ name, input })
   }
+  
+  // 格式 2: <tool_call>toolName{...}</tool_call> 或 <tool_call>\ntoolName\n{...}\n</tool_call>
+  const toolRegex2 = /<tool_call>\s*(\w+)\s*\{([^}]+)\}\s*<\/tool_call>/g
+  while ((match = toolRegex2.exec(content)) !== null) {
+    const name = match[1]
+    const jsonStr = '{' + match[2] + '}'
+    try {
+      const input = JSON.parse(jsonStr)
+      results.push({ name, input })
+    } catch {
+      // skip invalid JSON
+    }
+  }
+  
   return results
 }
 
