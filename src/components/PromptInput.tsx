@@ -24,9 +24,10 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   useEffect(() => {
     if (!isTTY || disabled) return
 
+    // 减慢到1秒，减少重新渲染频率
     const interval = setInterval(() => {
       setCursorChar(c => c === '|' ? '█' : '|')
-    }, 530)
+    }, 1000)
 
     return () => clearInterval(interval)
   }, [isTTY, disabled])
