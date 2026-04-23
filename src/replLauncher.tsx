@@ -3,7 +3,22 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { AppStateProvider, useSetAppState, useAppState } from './state/AppState'
 import { REPL } from './components/screens/REPL'
 import { DeepSeekClient } from './services/api/deepseek'
-import { createQueryLoop, type Tool, buildSystemPrompt } from './services/queryLoop'
+import { createQueryLoop, type Tool } from './services/queryLoop'
+
+function toolToOpenAI(tool: Tool): any {
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        properties: tool.inputSchema,
+        required: Object.keys(tool.inputSchema),
+      },
+    },
+  }
+}
 
 const DEFAULT_TOOLS: Tool[] = [
   {
@@ -21,37 +36,14 @@ const DEFAULT_TOOLS: Tool[] = [
   },
 ]
 
-const BASE_PROMPT = `You are a helpful AI assistant. You have a "calculate" tool for math.
+// 转换为官方 API 格式
+const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 
-STRICT Rules - FOLLOW EXACTLY:
-1. ALWAYS use <thinking> tags for reasoning
-2. ALWAYS call calculate tool for math - NEVER calculate mentally
-
-Use EXACTLY this format for thinking:
-<thinking>
-Step 1: 1+2*3, multiply 2*3 first = 6
-Step 2: 1+6 = 7
-</thinking>
-
-Use EXACTLY this format for tool call:
-<tool_call>
-<tool name="calculate">
-<param name="expression">1+2*3</param>
-</tool_call>
-
-After tool returns, give the final answer.`
+const BASE_PROMPT = `You are a helpful AI assistant. Use the calculate tool for math problems.`
 
 function cleanContent(content: string): string {
-  // 去除 XML 标签（只在最终存储时）
-  return content
-    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
-    .replace(/<tool name="[^"]*">[\s\S]*?<\/tool>/g, '')
-    .replace(/<param name="([^"]+)">([^<]+)<\/param>/g, '$2 ')
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-    .trim()
+  return content.trim()
 }
-
-const SYSTEM_PROMPT = buildSystemPrompt(DEFAULT_TOOLS, BASE_PROMPT)
 
 function App({ initialPrompt }: { initialPrompt?: string }) {
   const setState = useSetAppState()
@@ -107,10 +99,11 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       const queryLoop = createQueryLoop({
         client: apiRef.current,
         tools: DEFAULT_TOOLS,
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt: BASE_PROMPT,
         maxTurns: 5,
         initialMessages: conversationHistory,
-        onMessage: () => {},  // 不使用 onMessage，避免重复
+        openaiTools: OPENAI_TOOLS,  // 使用官方 API tools
+        onMessage: () => {},
       })
 
       let stepCount = 0

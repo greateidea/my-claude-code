@@ -17,6 +17,7 @@ export interface QueryLoopConfig {
   systemPrompt?: string
   initialMessages?: ChatMessage[]
   onMessage?: (content: string, isToolResult?: boolean) => void
+  openaiTools?: any[]  // Official API tool format
 }
 
 export interface QueryResult {
@@ -140,7 +141,33 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
     turnCount++
 
     try {
-      const response = await config.client.chat({ messages, maxTokens: 1500 })
+      const chatOptions: any = { messages, maxTokens: 1500 }
+      if (config.openaiTools) {
+        chatOptions.tools = config.openaiTools
+        chatOptions.system = config.systemPrompt
+      } else if (config.tools) {
+        chatOptions.system = config.systemPrompt || messages[0]?.content
+      }
+      
+      const response = await config.client.chat(chatOptions)
+      
+      // 检查官方 API 返回的 tool_calls
+      const apiToolCalls = response.toolCalls || []
+      
+      // 如果有官方 API tool_calls，直接执行
+      for (const tc of apiToolCalls) {
+        try {
+          const args = JSON.parse(tc.arguments)
+          const result = await toolExecutor.execute(tc.name, args)
+          yield { type: 'tool', toolUse: { name: tc.name, input: args }, toolResult: result }
+          messages.push({ 
+            role: 'user', 
+            content: JSON.stringify({ name: tc.name, result }) 
+          })
+        } catch (e: any) {
+          yield { type: 'error', content: `Tool error: ${e.message}` }
+        }
+      }
       
       const rawContent = response.message.content ?? ''
 

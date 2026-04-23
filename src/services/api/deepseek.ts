@@ -13,10 +13,12 @@ export interface ChatOptions {
   maxTokens?: number
   stream?: boolean
   onChunk?: (content: string, reasoning?: string) => void
+  tools?: OpenAI.ChatCompletionTool[]
 }
 
 export interface ChatResponse {
   message: ChatMessage
+  toolCalls?: Array<{ id: string; name: string; arguments: string }>
   usage?: {
     promptTokens: number
     completionTokens: number
@@ -55,15 +57,22 @@ export class DeepSeekClient {
       messages: options.messages,
       temperature: options.temperature,
       max_tokens: options.maxTokens,
+      ...(options.tools && { tools: options.tools }),
     })
 
     const choice = response.choices[0]
+    const rawToolCalls = choice.message.tool_calls as any[] || []
     
     return {
       message: {
         role: 'assistant',
         content: choice.message.content || '',
       },
+      toolCalls: rawToolCalls.map((tc: any) => ({
+        id: tc.id,
+        name: tc.function?.name || '',
+        arguments: tc.function?.arguments || '',
+      })),
       usage: response.usage ? {
         promptTokens: response.usage.prompt_tokens,
         completionTokens: response.usage.completion_tokens,
