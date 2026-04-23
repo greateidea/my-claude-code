@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, memo } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Box, Text } from 'ink'
 
 interface PromptInputProps {
@@ -6,19 +6,10 @@ interface PromptInputProps {
   disabled?: boolean
 }
 
-const Cursor = memo(function Cursor() {
-  const [visible, setVisible] = useState(true)
-  
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setVisible(v => !v)
-    }, 530)
-    return () => clearInterval(interval)
-  }, [])
-  
-  return <Text bold color="white">{visible ? '█' : ' '}</Text>
-})
-Cursor.displayName = 'Cursor'
+// 不使用动态闪烁，避免 Ink 重新渲染整个树
+function StaticCursor() {
+  return <Text bold color="white">▌</Text>
+}
 
 export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   const [input, setInput] = useState('')
@@ -105,7 +96,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
         <Text color={input ? 'white' : 'gray'}>
           {input || '(type message)...'}
         </Text>
-        <Cursor />
+        <StaticCursor />
       </Box>
       <Text dimColor>Press Enter to send, Ctrl+C to exit</Text>
     </Box>
