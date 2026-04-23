@@ -4,6 +4,7 @@ import { AppStateProvider, useSetAppState, useAppState } from './state/AppState'
 import { REPL } from './components/screens/REPL'
 import { DeepSeekClient } from './services/api/deepseek'
 import { createQueryLoop, type Tool } from './services/queryLoop'
+import { AVAILABLE_TOOLS } from './tools'
 
 function toolToOpenAI(tool: Tool): any {
   return {
@@ -34,14 +35,26 @@ const DEFAULT_TOOLS: Tool[] = [
       }
     },
   },
+  ...AVAILABLE_TOOLS,
 ]
 
 // 转换为官方 API 格式
 const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 
-const BASE_PROMPT = `You are a helpful AI assistant. You have access to a "calculate" tool that can evaluate math expressions.
-IMPORTANT: When a math problem is given, ALWAYS use the calculate tool. Do NOT calculate manually or provide step-by-step reasoning in your response.
-Just call the tool and return the result.`
+const BASE_PROMPT = `You are a helpful AI assistant with tools to help with tasks.
+
+Available tools:
+- calculate: Evaluate math expressions
+- bash: Execute shell commands  
+- Read: Read file contents
+- Write: Write content to files
+- Glob: Search for files by pattern
+
+IMPORTANT: 
+- Use tools for file operations, NOT manual answers
+- Use bash for running commands
+- Use Read to view files before editing
+- Use Write to create files`
 
 function cleanContent(content: string): string {
   return content.trim()
