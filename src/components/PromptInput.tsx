@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, memo } from 'react'
 import { Box, Text } from 'ink'
 
 interface PromptInputProps {
@@ -6,15 +6,23 @@ interface PromptInputProps {
   disabled?: boolean
 }
 
+const Cursor = memo(function Cursor() {
+  const [visible, setVisible] = useState(true)
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(v => !v)
+    }, 530)
+    return () => clearInterval(interval)
+  }, [])
+  
+  return <Text bold color="white">{visible ? '█' : ' '}</Text>
+})
+Cursor.displayName = 'Cursor'
+
 export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   const [input, setInput] = useState('')
   const [isTTY, setIsTTY] = useState(false)
-
-  useEffect(() => {
-    setIsTTY(process.stdin.isTTY === true)
-  }, [])
-
-  const [cursorChar, setCursorChar] = useState('|')
   const inputRef = useRef(input)
 
   useEffect(() => {
@@ -22,15 +30,8 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   }, [input])
 
   useEffect(() => {
-    if (!isTTY || disabled) return
-
-    // 减慢到1秒，减少重新渲染频率
-    const interval = setInterval(() => {
-      setCursorChar(c => c === '|' ? '█' : '|')
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [isTTY, disabled])
+    setIsTTY(process.stdin.isTTY === true)
+  }, [])
 
   useEffect(() => {
     if (!isTTY || disabled) return
@@ -58,7 +59,6 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
       }
       
       if (char.startsWith('\x1b')) {
-        // 方向键等 escape 序列，忽略而不是退出
         return
       }
       
@@ -68,7 +68,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
     }
 
     try {
-      (process.stdin as any).setRawMode?.(true)
+      ;(process.stdin as any).setRawMode?.(true)
       process.stdin.resume()
       process.stdin.setEncoding('utf8')
       process.stdin.on('data', handleData)
@@ -78,7 +78,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
 
     return () => {
       try {
-        (process.stdin as any).setRawMode?.(false)
+        ;(process.stdin as any).setRawMode?.(false)
         process.stdin.pause()
         process.stdin.removeListener('data', handleData)
       } catch (e) {}
@@ -105,7 +105,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
         <Text color={input ? 'white' : 'gray'}>
           {input || '(type message)...'}
         </Text>
-        <Text bold color="white">{cursorChar}</Text>
+        <Cursor />
       </Box>
       <Text dimColor>Press Enter to send, Ctrl+C to exit</Text>
     </Box>
