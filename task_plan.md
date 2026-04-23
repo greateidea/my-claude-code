@@ -47,10 +47,11 @@
 - [x] 工具执行器
 - [x] system prompt 构建
 
-### Phase 8: 集成 REPL ✅ IN_PROGRESS
+### Phase 8: 集成 REPL ✅ COMPLETED
 - [x] 循环集成到 replLauncher
-- [ ] 流式内容到 UI
-- [ ] 工具结果显示
+- [x] 流式内容到 UI
+- [x] Thinking 内容显示
+- [x] 工具结果显示
 
 ---
 

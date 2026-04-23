@@ -16,13 +16,24 @@ function cleanContent(content: string): string {
 interface REPLProps {
   messages: Array<{ id: string; type: string; content: string; timestamp: number }>
   streamingContent?: string
+  thinkingContent?: string
+  currentTool?: string | null
   isLoading?: boolean
   error?: string | null
   onSendMessage?: (text: string) => void
   ready?: boolean
 }
 
-export function REPL({ messages, streamingContent = '', isLoading = false, error, onSendMessage, ready = false }: REPLProps) {
+export function REPL({ 
+  messages, 
+  streamingContent = '', 
+  thinkingContent = '',
+  currentTool = null,
+  isLoading = false, 
+  error, 
+  onSendMessage, 
+  ready = false 
+}: REPLProps) {
   const handleSubmit = onSendMessage ?? (() => {})
 
   return (
@@ -40,6 +51,19 @@ export function REPL({ messages, streamingContent = '', isLoading = false, error
       <Spacer />
 
       <Messages messages={messages} />
+
+      {thinkingContent && (
+        <Box flexDirection="column">
+          <Text color="dim">💭 Thinking:</Text>
+          <Text color="dim">{thinkingContent}</Text>
+        </Box>
+      )}
+
+      {currentTool && (
+        <Box>
+          <Text color="yellow">🔧 Tool: {currentTool}</Text>
+        </Box>
+      )}
 
       {streamingContent && (
         <Box>

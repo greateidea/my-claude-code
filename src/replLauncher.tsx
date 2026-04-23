@@ -28,6 +28,11 @@ Rules:
 - NEVER calculate in your head - always use the tool
 - Output ONLY the tool call, nothing else
 
+When you need to think through a problem, use <thinking> tags to show your reasoning:
+<thinking>
+Step-by-step reasoning...
+</thinking>
+
 Tool call format:
 <tool_call>
 <tool name="calculate">
@@ -53,6 +58,8 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
+  const [thinkingContent, setThinkingContent] = useState('')
+  const [currentTool, setCurrentTool] = useState<string | null>(null)
   const apiRef = useRef<DeepSeekClient | null>(null)
   const messagesRef = useRef(messages)
   const initialized = useRef(false)
@@ -101,23 +108,37 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         systemPrompt: SYSTEM_PROMPT,
         maxTurns: 5,
         initialMessages: conversationHistory,
-        onMessage: () => {},
+        onMessage: (content, isToolResult) => {
+          if (isToolResult) {
+            setStreamingContent(prev => prev + '\n' + content + '\n')
+          } else if (content) {
+            setStreamingContent(prev => prev + content)
+          }
+        },
       })
 
       let stepCount = 0
       for await (const step of queryLoop) {
         stepCount++
-        if (step.type === 'message' && step.content) {
+        if (step.type === 'thinking' && step.content) {
+          setThinkingContent(step.content)
+        } else if (step.type === 'message' && step.content) {
           fullContent += step.content + '\n'
-        } else if (step.type === 'tool' && step.toolResult) {
-          toolMessages.push({
-            id: Date.now().toString() + Math.random(),
-            type: 'tool' as const,
-            content: `[${step.toolUse?.name}: ${step.toolResult}]`,
-            timestamp: Date.now()
-          })
+        } else if (step.type === 'tool') {
+          setCurrentTool(step.toolUse?.name || null)
+          if (step.toolResult) {
+            toolMessages.push({
+              id: Date.now().toString() + Math.random(),
+              type: 'tool' as const,
+              content: `[${step.toolUse?.name}: ${step.toolResult}]`,
+              timestamp: Date.now()
+            })
+          }
         }
       }
+      
+      setThinkingContent('')
+      setCurrentTool(null)
 
       const assistantMessage = { 
         id: Date.now().toString(), 
@@ -158,6 +179,8 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
     <REPL 
       messages={messages}
       streamingContent={streamingContent}
+      thinkingContent={thinkingContent}
+      currentTool={currentTool}
       isLoading={loading}
       error={error}
       onSendMessage={handleSend}
