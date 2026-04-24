@@ -51,7 +51,7 @@ Tools:
 
 RULES:
 - IMMEDIATELY call a tool without explaining
-- Do NOT manually list files - use bash or Glob
+- Do NOT manually list files - use Tools: bash or Glob
 - Do NOT explain what commands do - just execute them`
 
 function cleanContent(content: string): string {
@@ -138,7 +138,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
           
           // 更新完整内容（包含工具调用和结果）
           if (step.toolUse) {
-            fullContent += `\n[Tool: ${step.toolUse.name} = ${step.toolResult}]`
+            fullContent += `\n used [Tool: ${step.toolUse.name}]`
           }
         }
       } else if (step.type === 'message' && step.content) {
