@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { DeepSeekClient, type ChatMessage } from './api/deepseek'
 import { partitionToolCalls, hasToolCalls } from './toolOrchestration'
+import { permissionManager, type PermissionRequest, type PermissionResponse } from './permissions'
 
 export interface Tool {
   name: string
@@ -18,7 +19,9 @@ export interface QueryLoopConfig {
   systemPrompt?: string
   initialMessages?: ChatMessage[]
   onMessage?: (content: string, isToolResult?: boolean) => void
-  openaiTools?: any[]  // Official API tool format
+  openaiTools?: any[]
+  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
+  cwd?: string
 }
 
 export interface QueryResult {
@@ -28,10 +31,12 @@ export interface QueryResult {
 }
 
 export interface QueryStep {
-  type: 'message' | 'tool' | 'error' | 'thinking'
+  type: 'message' | 'tool' | 'error' | 'thinking' | 'permission'
   content?: string
   toolUse?: { name: string; input: Record<string, string> }
   toolResult?: string
+  permissionRequest?: PermissionRequest
+  permissionResponse?: PermissionResponse
 }
 
 export function findToolCalls(content: string): { name: string; input: Record<string, string> }[] {
@@ -70,12 +75,41 @@ export function findToolCalls(content: string): { name: string; input: Record<st
 function createToolExecutor(tools: Tool[]) {
   const toolMap = new Map(tools.map(t => [t.name, t.execute]))
   return {
-    execute(name: string, input: Record<string, any>): Promise<string> {
+    async execute(name: string, input: Record<string, any>): Promise<string> {
       const fn = toolMap.get(name)
-      if (!fn) return Promise.resolve(`Tool "${name}" not found`)
-      return fn(input).catch((e: Error) => `Error: ${e.message}`)
+      if (!fn) return `Tool "${name}" not found`
+      try {
+        return await fn(input)
+      } catch (e: any) {
+        return `Error: ${e.message}`
+      }
     },
   }
+}
+
+function checkAndRequestPermission(
+  toolName: string,
+  toolInput: Record<string, any>,
+  cwd: string,
+  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
+): { decision: 'allow' | 'deny' | 'ask'; request?: PermissionRequest; result?: string } {
+  const checkResult = permissionManager.checkPermission(toolName, toolInput, cwd)
+
+  if (checkResult.decision === 'deny') {
+    return { decision: 'deny', result: `Permission denied: ${checkResult.rule || 'by rule'}` }
+  }
+
+  if (checkResult.decision === 'ask' && onPermissionRequest) {
+    const request: PermissionRequest = {
+      toolName,
+      toolInput,
+      title: toolName,
+      description: JSON.stringify(toolInput, null, 2),
+    }
+    return { decision: 'ask', request }
+  }
+
+  return { decision: 'allow' }
 }
 
 const THINKING_REGEX = /<thinking>([\s\S]*?)<\/thinking>/gi
@@ -192,13 +226,34 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
 
       // 使用 partitionToolCalls 统一决策并行/串行
       const batches = partitionToolCalls(allToolCalls)
+      const cwd = config.cwd || process.cwd()
       
       for (const batch of batches) {
         if (batch.isConcurrencySafe && batch.calls.length > 1) {
-          // 并行执行
-          const results = await Promise.all(
-            batch.calls.map(tc => toolExecutor.execute(tc.name, tc.input))
-          )
+          // 并行执行 - 检查每个工具的权限
+          const results: string[] = []
+          for (const tc of batch.calls) {
+            const permResult = checkAndRequestPermission(tc.name, tc.input, cwd, config.onPermissionRequest)
+            if (permResult.decision === 'deny') {
+              results.push(permResult.result!)
+            } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
+              try {
+                yield { type: 'permission', permissionRequest: permResult.request }
+                const response = await config.onPermissionRequest!(permResult.request!)
+                yield { type: 'permission', permissionResponse: response }
+                if (!response.allowed) {
+                  results.push('Permission denied by user')
+                } else {
+                  permissionManager.addSessionRule(tc.name, tc.input, true)
+                  results.push(await toolExecutor.execute(tc.name, tc.input))
+                }
+              } catch (permError: any) {
+                results.push(`Permission error: ${permError.message || 'unknown'}`)
+              }
+            } else {
+              results.push(await toolExecutor.execute(tc.name, tc.input))
+            }
+          }
           for (let i = 0; i < batch.calls.length; i++) {
             const tc = batch.calls[i]
             const result = results[i]
@@ -208,9 +263,31 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
             messages.push({ role: 'user', content: toolResultContent })
           }
         } else {
-          // 串行执行
+          // 串行执行 - 检查每个工具的权限
           for (const tc of batch.calls) {
-            const result = await toolExecutor.execute(tc.name, tc.input)
+            const permResult = checkAndRequestPermission(tc.name, tc.input, cwd, config.onPermissionRequest)
+            let result: string
+            
+            if (permResult.decision === 'deny') {
+              result = permResult.result!
+            } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
+              try {
+                yield { type: 'permission', permissionRequest: permResult.request }
+                const response = await config.onPermissionRequest(permResult.request!)
+                yield { type: 'permission', permissionResponse: response }
+                if (!response.allowed) {
+                  result = 'Permission denied by user'
+                } else {
+                  permissionManager.addSessionRule(tc.name, tc.input, true)
+                  result = await toolExecutor.execute(tc.name, tc.input)
+                }
+              } catch (permError: any) {
+                result = `Permission error: ${permError.message || 'unknown'}`
+              }
+            } else {
+              result = await toolExecutor.execute(tc.name, tc.input)
+            }
+            
             yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
             const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
             config.onMessage?.(toolResultContent, true)

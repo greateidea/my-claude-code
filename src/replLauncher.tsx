@@ -61,6 +61,7 @@ function cleanContent(content: string): string {
 function App({ initialPrompt }: { initialPrompt?: string }) {
   const setState = useSetAppState()
   const messages = useAppState(s => s.messages)
+  const cwd = useAppState(s => s.cwd)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
@@ -115,8 +116,14 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         systemPrompt: BASE_PROMPT,
         maxTurns: 5,
         initialMessages: conversationHistory,
-        openaiTools: OPENAI_TOOLS,  // 使用官方 API tools
+        openaiTools: OPENAI_TOOLS,
         onMessage: () => {},
+        cwd: cwd,
+        onPermissionRequest: async (request) => {
+          console.error(`[Permission] ${request.toolName}: ${request.title}`)
+          console.error(`[Permission] Details: ${request.description}`)
+          return { allowed: true, option: 'allow_once' }
+        },
       })
 
       let stepCount = 0
@@ -132,7 +139,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
             toolMessages.push({
               id: Date.now().toString() + Math.random(),
               type: 'tool' as const,
-              content: `[${step.toolUse?.name}: ${step.toolResult}]`,
+              content: `tool called message: [${step.toolUse?.name}: ${step.toolResult}]`,
               timestamp: Date.now()
             })
             
