@@ -128,22 +128,22 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
           fullContent += step.content + '\n'
         } else if (step.type === 'tool') {
           setCurrentTool(step.toolUse?.name || null)
-        if (step.toolResult) {
-          toolMessages.push({
-            id: Date.now().toString() + Math.random(),
-            type: 'tool' as const,
-            content: `[${step.toolUse?.name}: ${step.toolResult}]`,
-            timestamp: Date.now()
-          })
-          
-          // 更新完整内容（包含工具调用和结果）
-          if (step.toolUse) {
-            fullContent += `\n used [Tool: ${step.toolUse.name}]`
+          if (step.toolResult) {
+            toolMessages.push({
+              id: Date.now().toString() + Math.random(),
+              type: 'tool' as const,
+              content: `[${step.toolUse?.name}: ${step.toolResult}]`,
+              timestamp: Date.now()
+            })
+            
+            // 更新完整内容（包含工具调用和结果）
+            if (step.toolUse) {
+              fullContent += `\n used [Tool: ${step.toolUse.name}, Input: ${JSON.stringify(step.toolUse.input || {})}]\n`
+            }
           }
+        } else if (step.type === 'message' && step.content) {
+          fullContent += step.content + '\n'
         }
-      } else if (step.type === 'message' && step.content) {
-        fullContent += step.content + '\n'
-      }
       }
       
       setThinkingContent('')

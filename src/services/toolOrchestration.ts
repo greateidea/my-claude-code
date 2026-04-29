@@ -1,0 +1,175 @@
+import { z } from 'zod'
+import { AVAILABLE_TOOLS, findToolByName, type Tool, type ToolInput } from '../tools'
+
+export interface ToolCall {
+  id: string
+  name: string
+  input: ToolInput
+}
+
+export interface ToolResult {
+  id: string
+  name: string
+  input: ToolInput
+  result: string
+  error?: string
+}
+
+export interface ToolExecutionStep {
+  type: 'tool' | 'result' | 'error'
+  toolCall?: ToolCall
+  result?: string
+  error?: string
+}
+
+interface ToolBatch {
+  isConcurrencySafe: boolean
+  calls: ToolCall[]
+}
+
+function parseToolCalls(content: string): ToolCall[] {
+  const results: ToolCall[] = []
+  
+  // 解析 JSON 格式的工具调用: {"name": "bash", "arguments": {...}}
+  const jsonRegex = /<tool_call>\s*(\w+)\s*\{([^}]+)\}\s*<\/tool_call>/g
+  let match
+  while ((match = jsonRegex.exec(content)) !== null) {
+    const name = match[1]
+    try {
+      const args = JSON.parse('{' + match[2] + '}')
+      results.push({
+        id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name,
+        input: args,
+      })
+    } catch {}
+  }
+
+  // 解析 XML 格式的工具调用
+  const xmlRegex = /<tool name="(\w+)">([\s\S]*?)<\/tool>/g
+  while ((match = xmlRegex.exec(content)) !== null) {
+    const name = match[1]
+    const body = match[2]
+    const input: Record<string, string> = {}
+    const paramRegex = /<param name="([^"]+)">([^<]+)<\/param>/g
+    let paramMatch
+    while ((paramMatch = paramRegex.exec(body)) !== null) {
+      input[paramMatch[1]] = paramMatch[2]
+    }
+    results.push({
+      id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      input,
+    })
+  }
+
+  return results
+}
+
+function isInputConcurrencySafe(tool: Tool | undefined, input: ToolInput): boolean {
+  if (!tool?.isConcurrencySafe) return false
+  try {
+    return tool.isConcurrencySafe(input)
+  } catch {
+    return false
+  }
+}
+
+export function partitionToolCalls(calls: ToolCall[]): ToolBatch[] {
+  return calls.reduce((acc: ToolBatch[], call) => {
+    const tool = findToolByName(AVAILABLE_TOOLS, call.name)
+    const isSafe = isInputConcurrencySafe(tool, call.input)
+    
+    if (isSafe && acc.length > 0 && acc[acc.length - 1]!.isConcurrencySafe) {
+      acc[acc.length - 1]!.calls.push(call)
+    } else {
+      acc.push({ isConcurrencySafe: isSafe, calls: [call] })
+    }
+    return acc
+  }, [])
+}
+
+const MAX_CONCURRENCY = 10
+
+async function executeSingleTool(call: ToolCall): Promise<ToolResult> {
+  const tool = findToolByName(AVAILABLE_TOOLS, call.name)
+  
+  if (!tool) {
+    return {
+      id: call.id,
+      name: call.name,
+      input: call.input,
+      result: '',
+      error: `Tool "${call.name}" not found`,
+    }
+  }
+
+  try {
+    const result = await tool.execute(call.input)
+    return { id: call.id, name: call.name, input: call.input, result }
+  } catch (e: any) {
+    return {
+      id: call.id,
+      name: call.name,
+      input: call.input,
+      result: '',
+      error: e.message,
+    }
+  }
+}
+
+async function* executeToolsSerially(
+  calls: ToolCall[],
+): AsyncGenerator<ToolExecutionStep> {
+  for (const call of calls) {
+    yield { type: 'tool', toolCall: call }
+    const result = await executeSingleTool(call)
+    if (result.error) {
+      yield { type: 'error', error: result.error, toolCall: call }
+    } else {
+      yield { type: 'result', result: result.result, toolCall: call }
+    }
+  }
+}
+
+async function* executeToolsConcurrently(
+  calls: ToolCall[],
+): AsyncGenerator<ToolExecutionStep> {
+  const promises = calls.map(async (call) => {
+    return { call, result: await executeSingleTool(call) }
+  })
+
+  for (const p of promises) {
+    const { call, result } = await p
+    
+    if (result.error) {
+      yield { type: 'error', error: result.error, toolCall: call }
+    } else {
+      yield { type: 'result', result: result.result, toolCall: call }
+    }
+  }
+}
+
+export async function* runToolCalls(
+  content: string,
+): AsyncGenerator<ToolExecutionStep> {
+  const calls = parseToolCalls(content)
+  
+  if (calls.length === 0) {
+    return
+  }
+
+  const batches = partitionToolCalls(calls)
+
+  for (const batch of batches) {
+    if (batch.isConcurrencySafe && batch.calls.length > 1) {
+      yield* executeToolsConcurrently(batch.calls)
+    } else {
+      yield* executeToolsSerially(batch.calls)
+    }
+  }
+}
+
+export function hasToolCalls(content: string): boolean {
+  return parseToolCalls(content).length > 0
+}

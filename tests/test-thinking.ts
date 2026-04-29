@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { set, z } from 'zod'
 import { DeepSeekClient } from '../src/services/api/deepseek.js'
 import { createQueryLoop, buildSystemPrompt, type Tool } from '../src/services/queryLoop.js'
 
@@ -59,7 +59,7 @@ async function test() {
     } else if (step.type === 'message') {
       console.log('📝 Message:', step.content?.slice(0, 100))
     } else if (step.type === 'tool') {
-      console.log('🔧 Tool:', step.toolUse)
+      console.log('🔧 Tool:', step.toolUse, step.toolUse?.input)
       console.log('📋 Result:', step.toolResult)
     } else if (step.type === 'error') {
       console.log('❌ Error:', step.content)

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { DeepSeekClient, type ChatMessage } from './api/deepseek'
+import { partitionToolCalls, hasToolCalls } from './toolOrchestration'
 
 export interface Tool {
   name: string
@@ -147,56 +148,75 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       const response = await config.client.chat(chatOptions)
       
       // 检查官方 API 返回的 tool_calls
-      const apiToolCalls = response.toolCalls || []
+      const apiToolCalls: { name: string; input: Record<string, any> }[] = (response.toolCalls || []).map((tc: any) => ({
+        name: tc.name,
+        input: JSON.parse(tc.arguments),
+      }))
       
-      // 如果有官方 API tool_calls，直接执行
-      for (const tc of apiToolCalls) {
-        try {
-          const args = JSON.parse(tc.arguments)
-          const result = await toolExecutor.execute(tc.name, args)
-          yield { type: 'tool', toolUse: { name: tc.name, input: args }, toolResult: result }
-          messages.push({ 
-            role: 'user', 
-            content: JSON.stringify({ name: tc.name, result }) 
-          })
-        } catch (e: any) {
-          yield { type: 'error', content: `Tool error: ${e.message}` }
-        }
-      }
-      
+      // 只有在没有 openaiTools 时才解析 prompt 格式的工具调用
       const rawContent = response.message.content ?? ''
+      const promptToolCalls = !config.openaiTools ? findToolCalls(rawContent) : []
 
+      // 合并所有工具调用，统一通过 partitionToolCalls 决策
+      const allToolCalls = [...apiToolCalls, ...promptToolCalls].map((tc, i) => ({
+        id: `call_${turnCount}_${i}`,
+        name: tc.name,
+        input: tc.input,
+      }))
+
+      if (allToolCalls.length === 0) {
+        const thinking = extractThinkingContent(rawContent)
+        if (thinking) {
+          yield { type: 'thinking', content: thinking }
+          config.onMessage?.(`[thinking] ${thinking}`, false)
+        }
+        const content = stripThinkingContent(rawContent)
+        config.onMessage?.(content, false)
+        yield { type: 'message', content }
+        if (content) messages.push({ role: 'assistant', content })
+        else if (thinking) messages.push({ role: 'assistant', content: rawContent })
+        return { reason: 'completed', turnCount }
+      }
+
+      // 先输出消息内容（包含 thinking）
       const thinking = extractThinkingContent(rawContent)
       if (thinking) {
         yield { type: 'thinking', content: thinking }
         config.onMessage?.(`[thinking] ${thinking}`, false)
       }
-
       const content = stripThinkingContent(rawContent)
       config.onMessage?.(content, false)
       yield { type: 'message', content }
+      if (content) messages.push({ role: 'assistant', content })
+      else if (thinking) messages.push({ role: 'assistant', content: rawContent })
 
-      if (content) {
-        messages.push({ role: 'assistant', content })
-      } else if (thinking) {
-        messages.push({ role: 'assistant', content: rawContent })
-      }
-
-      // 只有在没有 openaiTools 时才解析 prompt 格式的工具调用
-      const toolCalls = !config.openaiTools ? findToolCalls(content) : []
+      // 使用 partitionToolCalls 统一决策并行/串行
+      const batches = partitionToolCalls(allToolCalls)
       
-      if (toolCalls.length === 0) {
-        return { reason: 'completed', turnCount }
-      }
-
-      for (const tc of toolCalls) {
-        const result = await toolExecutor.execute(tc.name, tc.input)
-        
-        yield { type: 'tool', toolUse: tc, toolResult: result }
-        
-        const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
-        config.onMessage?.(toolResultContent, true)
-        messages.push({ role: 'user', content: toolResultContent })
+      for (const batch of batches) {
+        if (batch.isConcurrencySafe && batch.calls.length > 1) {
+          // 并行执行
+          const results = await Promise.all(
+            batch.calls.map(tc => toolExecutor.execute(tc.name, tc.input))
+          )
+          for (let i = 0; i < batch.calls.length; i++) {
+            const tc = batch.calls[i]
+            const result = results[i]
+            yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
+            const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
+            config.onMessage?.(toolResultContent, true)
+            messages.push({ role: 'user', content: toolResultContent })
+          }
+        } else {
+          // 串行执行
+          for (const tc of batch.calls) {
+            const result = await toolExecutor.execute(tc.name, tc.input)
+            yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
+            const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
+            config.onMessage?.(toolResultContent, true)
+            messages.push({ role: 'user', content: toolResultContent })
+          }
+        }
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)

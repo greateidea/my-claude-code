@@ -21,11 +21,28 @@ async function safeExec(command: string, timeout = 30000): Promise<string> {
   })
 }
 
+export interface ToolInput {
+  [key: string]: any
+}
+
 export interface Tool {
   name: string
   description: string
   inputSchema: z.ZodRawShape
-  execute: (input: any) => Promise<string>
+  execute: (input: ToolInput) => Promise<string>
+  isConcurrencySafe?: (input: ToolInput) => boolean
+}
+
+function readOnlyTool(): Partial<Tool> {
+  return {
+    isConcurrencySafe: () => true,
+  }
+}
+
+function writeTool(): Partial<Tool> {
+  return {
+    isConcurrencySafe: () => false,
+  }
 }
 
 export const BashTool: Tool = {
@@ -38,11 +55,12 @@ export const BashTool: Tool = {
   execute: async ({ command, timeout = 30000 }) => {
     try {
       const output = await safeExec(command, timeout)
-      return output.slice(0, 100000) // Limit output size
+      return output.slice(0, 100000)
     } catch (e: any) {
       return `Error: ${e.message}`
     }
   },
+  ...writeTool(),
 }
 
 export const FileReadTool: Tool = {
@@ -57,12 +75,12 @@ export const FileReadTool: Tool = {
         return `Error: File not found: ${file_path}`
       }
       const content = await readFile(file_path, 'utf-8')
-      // Limit to first 100KB
       return content.slice(0, 100000)
     } catch (e: any) {
       return `Error: ${e.message}`
     }
   },
+  ...readOnlyTool(),
 }
 
 export const FileWriteTool: Tool = {
@@ -74,7 +92,6 @@ export const FileWriteTool: Tool = {
   },
   execute: async ({ file_path, content }) => {
     try {
-      // Ensure directory exists
       const dir = dirname(file_path)
       if (!existsSync(dir)) {
         await mkdir(dir, { recursive: true })
@@ -85,6 +102,7 @@ export const FileWriteTool: Tool = {
       return `Error: ${e.message}`
     }
   },
+  ...writeTool(),
 }
 
 export const GlobTool: Tool = {
@@ -96,7 +114,6 @@ export const GlobTool: Tool = {
   },
   execute: async ({ pattern, path = '.' }) => {
     try {
-      // Simple recursive search
       const results: string[] = []
       
       async function search(dir: string, pat: string) {
@@ -119,6 +136,28 @@ export const GlobTool: Tool = {
       return `Error: ${e.message}`
     }
   },
+  ...readOnlyTool(),
 }
 
-export const AVAILABLE_TOOLS = [BashTool, FileReadTool, FileWriteTool, GlobTool]
+export const CalculateTool: Tool = {
+  name: 'calculate',
+  description: 'Evaluate math expressions',
+  inputSchema: {
+    expression: z.string().describe('Math expression to evaluate'),
+  },
+  execute: async ({ expression }) => {
+    try {
+      const result = Function(`"use strict"; return (${expression})`)()
+      return String(result)
+    } catch (e: any) {
+      return `Error: ${e.message}`
+    }
+  },
+  ...readOnlyTool(),
+}
+
+export const AVAILABLE_TOOLS = [CalculateTool, BashTool, FileReadTool, FileWriteTool, GlobTool]
+
+export function findToolByName(tools: Tool[], name: string): Tool | undefined {
+  return tools.find(t => t.name === name)
+}
