@@ -5,6 +5,8 @@ import { REPL } from './components/screens/REPL'
 import { DeepSeekClient } from './services/api/deepseek'
 import { createQueryLoop, type Tool } from './services/queryLoop'
 import { AVAILABLE_TOOLS } from './tools'
+import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
+import type { PermissionRequest, PermissionResponse } from './services/permissions'
 
 function toolToOpenAI(tool: Tool): any {
   return {
@@ -68,6 +70,8 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   const [streamingContent, setStreamingContent] = useState('')
   const [thinkingContent, setThinkingContent] = useState('')
   const [currentTool, setCurrentTool] = useState<string | null>(null)
+  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
+  const permissionResolveRef = useRef<((response: PermissionResponse) => void) | null>(null)
   const apiRef = useRef<DeepSeekClient | null>(null)
   const messagesRef = useRef(messages)
   const initialized = useRef(false)
@@ -76,6 +80,17 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  const handlePermissionResponse = useCallback((allowed: boolean) => {
+    if (permissionResolveRef.current) {
+      permissionResolveRef.current({
+        allowed,
+        option: allowed ? 'allow_once' : 'reject_once',
+      })
+      permissionResolveRef.current = null
+    }
+    setPendingPermission(null)
+  }, [])
 
   const handleSend = useCallback(async (text: string) => {
     if (!apiRef.current || loading) return
@@ -120,9 +135,10 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         onMessage: () => {},
         cwd: cwd,
         onPermissionRequest: async (request) => {
-          console.error(`[Permission] ${request.toolName}: ${request.title}`)
-          console.error(`[Permission] Details: ${request.description}`)
-          return { allowed: true, option: 'allow_once' }
+          return new Promise((resolve) => {
+            setPendingPermission(request)
+            permissionResolveRef.current = resolve
+          })
         },
       })
 
@@ -206,16 +222,24 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   }, [initialPrompt, handleSend])
 
   return (
-    <REPL 
-      messages={messages}
-      streamingContent={streamingContent}
-      thinkingContent={thinkingContent}
-      currentTool={currentTool}
-      isLoading={loading}
-      error={error}
-      onSendMessage={handleSend}
-      ready={ready}
-    />
+    <>
+      {pendingPermission && (
+        <PermissionConfirm
+          request={pendingPermission}
+          onResponse={(response) => handlePermissionResponse(response.allowed)}
+        />
+      )}
+      <REPL 
+        messages={messages}
+        streamingContent={streamingContent}
+        thinkingContent={thinkingContent}
+        currentTool={currentTool}
+        isLoading={loading}
+        error={error}
+        onSendMessage={handleSend}
+        ready={ready}
+      />
+    </>
   )
 }
 
