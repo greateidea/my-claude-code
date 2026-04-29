@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text, useInput } from 'ink'
 import type { PermissionRequest, PermissionResponse } from '../services/permissions.js'
 
 interface PermissionConfirmProps {
@@ -15,13 +15,21 @@ export const PermissionConfirm: React.FC<PermissionConfirmProps> = ({ request, o
     { label: 'Deny once', value: 'reject_once' as const },
   ]
 
-  const handleConfirm = () => {
-    const option = options[selected]
-    onResponse({
-      allowed: option.value === 'allow_once',
-      option: option.value,
-    })
-  }
+  useInput((input, key) => {
+    if (key.upArrow) {
+      setSelected((s) => Math.max(0, s - 1))
+    } else if (key.downArrow) {
+      setSelected((s) => Math.min(options.length - 1, s + 1))
+    } else if (key.return) {
+      const option = options[selected]
+      onResponse({
+        allowed: option.value === 'allow_once',
+        option: option.value,
+      })
+    } else if (key.escape) {
+      onResponse({ allowed: false, option: 'reject_once' })
+    }
+  })
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1}>

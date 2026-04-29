@@ -145,6 +145,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       let stepCount = 0
       for await (const step of queryLoop) {
         stepCount++
+        console.error(`[DEBUG] Step ${stepCount}: ${step.type}`)
         if (step.type === 'thinking' && step.content) {
           setThinkingContent(step.content)
         } else if (step.type === 'message' && step.content) {
@@ -166,8 +167,15 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
           }
         } else if (step.type === 'message' && step.content) {
           fullContent += step.content + '\n'
+        } else if (step.type === 'permission') {
+          // 权限步骤已被 handlePermissionResponse 处理，这里忽略
+          console.error(`[DEBUG] Permission step: ${step.permissionRequest?.title}`)
+        } else if (step.type === 'error') {
+          console.error(`[DEBUG] Error step: ${step.content}`)
+          fullContent += `\nError: ${step.content}\n`
         }
       }
+      console.error('[DEBUG] Query loop finished')
       
       setThinkingContent('')
       setCurrentTool(null)
