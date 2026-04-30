@@ -207,7 +207,6 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       setError(errMsg)
     } finally {
       setLoading(false)
-      console.error('[handleSend] Done')
     }
   }, [])
 
@@ -272,11 +271,15 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 方式1: setInterval - 保持定时器引用
+  // 保持定时器活跃
   const timer = setInterval(function() {}, 0)
   
-  // 方式2: 监听信号退出
+  // 允许 Ctrl+C 退出
   process.on('SIGINT', function() {
+    clearInterval(timer)
+    process.exit(0)
+  })
+  process.on('SIGTERM', function() {
     clearInterval(timer)
     process.exit(0)
   })
