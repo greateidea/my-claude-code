@@ -261,6 +261,8 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 保持程序运行
-  return new Promise(() => {})
+  // 保持程序运行 - 使用阻塞循环
+  while (true) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
 }
