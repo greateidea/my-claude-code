@@ -112,6 +112,77 @@ function checkAndRequestPermission(
   return { decision: 'allow' }
 }
 
+interface ToolExecutor {
+  execute(name: string, input: Record<string, any>): Promise<string>
+}
+
+interface ExecuteConfig {
+  cwd: string
+  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
+}
+
+async function* executeConcurrently(
+  calls: { id: string; name: string; input: Record<string, any> }[],
+  executor: ToolExecutor,
+  config: ExecuteConfig,
+): AsyncGenerator<{ type: 'tool' | 'permission'; toolUse?: { name: string; input: Record<string, string> }; toolResult?: string; permissionRequest?: PermissionRequest; permissionResponse?: PermissionResponse }> {
+  const MAX_CONCURRENCY = 10
+
+  async function executeOne(
+    tc: { id: string; name: string; input: Record<string, any> }
+  ): Promise<{ tc: { id: string; name: string; input: Record<string, any> }; result: string }> {
+    const permResult = checkAndRequestPermission(tc.name, tc.input, config.cwd, config.onPermissionRequest)
+    let result: string
+
+    if (permResult.decision === 'deny') {
+      result = permResult.result!
+    } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
+      result = 'Permission requires response'
+    } else {
+      result = await executor.execute(tc.name, tc.input)
+    }
+
+    return { tc, result }
+  }
+
+  const running: Promise<{ tc: { id: string; name: string; input: Record<string, any> }; result: string }>[] = []
+  const pending = new Set(calls.map(c => c.id))
+  const queue = [...calls]
+  let queueIndex = 0
+
+  while (pending.size > 0) {
+    while (running.length < MAX_CONCURRENCY && queueIndex < queue.length) {
+      const tc = queue[queueIndex++]
+      running.push(executeOne(tc))
+    }
+
+    if (running.length === 0) break
+
+    const done = await Promise.race(running)
+    const idx = running.findIndex(p => Promise.resolve(p) === Promise.resolve(done))
+    if (idx >= 0) running.splice(idx, 1)
+    pending.delete(done.tc.id)
+
+    const permResult = checkAndRequestPermission(done.tc.name, done.tc.input, config.cwd, config.onPermissionRequest)
+
+    if (permResult.decision === 'ask' && config.onPermissionRequest) {
+      yield { type: 'permission', permissionRequest: permResult.request }
+      const response = await config.onPermissionRequest(permResult.request!)
+      yield { type: 'permission', permissionResponse: response }
+
+      if (response.allowed) {
+        permissionManager.addSessionRule(done.tc.name, done.tc.input, true)
+        const result = await executor.execute(done.tc.name, done.tc.input)
+        yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: result }
+      } else {
+        yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: 'Permission denied by user' }
+      }
+    } else {
+      yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: done.result }
+    }
+  }
+}
+
 const THINKING_REGEX = /<thinking>([\s\S]*?)<\/thinking>/gi
 
 export function extractThinkingContent(content: string): string | null {
@@ -230,38 +301,11 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       
       for (const batch of batches) {
         if (batch.isConcurrencySafe && batch.calls.length > 1) {
-          // 并行执行 - 检查每个工具的权限
-          const results: string[] = []
-          for (const tc of batch.calls) {
-            const permResult = checkAndRequestPermission(tc.name, tc.input, cwd, config.onPermissionRequest)
-            if (permResult.decision === 'deny') {
-              results.push(permResult.result!)
-            } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
-              try {
-                yield { type: 'permission', permissionRequest: permResult.request }
-                const response = await config.onPermissionRequest!(permResult.request!)
-                yield { type: 'permission', permissionResponse: response }
-                if (!response.allowed) {
-                  results.push('Permission denied by user')
-                } else {
-                  permissionManager.addSessionRule(tc.name, tc.input, true)
-                  results.push(await toolExecutor.execute(tc.name, tc.input))
-                }
-              } catch (permError: any) {
-                results.push(`Permission error: ${permError.message || 'unknown'}`)
-              }
-            } else {
-              results.push(await toolExecutor.execute(tc.name, tc.input))
-            }
-          }
-          for (let i = 0; i < batch.calls.length; i++) {
-            const tc = batch.calls[i]
-            const result = results[i]
-            yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
-            const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
-            config.onMessage?.(toolResultContent, true)
-            messages.push({ role: 'user', content: toolResultContent })
-          }
+          // 真正的并行执行 - 按完成顺序 yield 结果
+          yield* executeConcurrently(batch.calls, toolExecutor, {
+            cwd,
+            onPermissionRequest: config.onPermissionRequest,
+          })
         } else {
           // 串行执行 - 检查每个工具的权限
           for (const tc of batch.calls) {

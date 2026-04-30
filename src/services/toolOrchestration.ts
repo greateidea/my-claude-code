@@ -27,6 +27,35 @@ interface ToolBatch {
   calls: ToolCall[]
 }
 
+class Semaphore {
+  private permits: number
+  private waitQueue: Array<() => void> = []
+
+  constructor(permits: number) {
+    this.permits = permits
+  }
+
+  async acquire(): Promise<void> {
+    if (this.permits > 0) {
+      this.permits--
+      return Promise.resolve()
+    }
+
+    return new Promise<void>((resolve) => {
+      this.waitQueue.push(resolve)
+    })
+  }
+
+  release(): void {
+    this.permits++
+    const next = this.waitQueue.shift()
+    if (next) {
+      this.permits--
+      next()
+    }
+  }
+}
+
 function parseToolCalls(content: string): ToolCall[] {
   const results: ToolCall[] = []
   
@@ -90,6 +119,51 @@ export function partitionToolCalls(calls: ToolCall[]): ToolBatch[] {
 }
 
 const MAX_CONCURRENCY = 10
+const semaphore = new Semaphore(MAX_CONCURRENCY)
+
+async function* all<T>(
+  generators: AsyncGenerator<T>[],
+  concurrency: number,
+): AsyncGenerator<T> {
+  const sem = new Semaphore(concurrency)
+  const active: Promise<{ done: boolean; value: T }>[] = []
+  const genDone = new Set<number>()
+
+  function runGen(index: number, gen: AsyncGenerator<T>): Promise<{ done: boolean; value: T }> {
+    return (async () => {
+      try {
+        const result = await gen.next()
+        if (result.done) {
+          genDone.add(index)
+        }
+        return { done: Boolean(result.done), value: result.value as T }
+      } finally {
+        sem.release()
+      }
+    })()
+  }
+
+  for (let i = 0; i < generators.length; i++) {
+    if (active.length >= concurrency) {
+      const result = await Promise.race(active)
+      if (!result.done) {
+        yield result.value
+      }
+    }
+    
+    await sem.acquire()
+    active.push(runGen(i, generators[i]))
+  }
+
+  while (active.length > 0) {
+    const result = await Promise.race(active)
+    if (!result.done) {
+      yield result.value
+    }
+    const idx = active.findIndex(p => p === Promise.resolve(result))
+    if (idx >= 0) active.splice(idx, 1)
+  }
+}
 
 async function executeSingleTool(call: ToolCall): Promise<ToolResult> {
   const tool = findToolByName(AVAILABLE_TOOLS, call.name)
@@ -135,18 +209,27 @@ async function* executeToolsSerially(
 async function* executeToolsConcurrently(
   calls: ToolCall[],
 ): AsyncGenerator<ToolExecutionStep> {
-  const promises = calls.map(async (call) => {
-    return { call, result: await executeSingleTool(call) }
-  })
+  const sem = new Semaphore(MAX_CONCURRENCY)
 
-  for (const p of promises) {
-    const { call, result } = await p
-    
-    if (result.error) {
-      yield { type: 'error', error: result.error, toolCall: call }
-    } else {
-      yield { type: 'result', result: result.result, toolCall: call }
+  async function* runWithSemaphore(call: ToolCall): AsyncGenerator<ToolExecutionStep> {
+    await sem.acquire()
+    try {
+      yield { type: 'tool', toolCall: call }
+      const result = await executeSingleTool(call)
+      if (result.error) {
+        yield { type: 'error', error: result.error, toolCall: call }
+      } else {
+        yield { type: 'result', result: result.result, toolCall: call }
+      }
+    } finally {
+      sem.release()
     }
+  }
+
+  const generators = calls.map(call => runWithSemaphore(call))
+
+  for await (const step of all(generators, MAX_CONCURRENCY)) {
+    yield step
   }
 }
 
