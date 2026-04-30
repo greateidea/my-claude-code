@@ -260,9 +260,13 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
   ;(render as any)(app, {
     stdout: process.stdout,
     stdin: process.stdin,
-    exitOnClose: false,
   })
 
-  // 阻塞等待，防止进程退出
-  await new Promise(() => {})
+  console.error('[launchRepl] After render')
+
+  let i = 0
+  setInterval(() => {
+    console.error('[launchRepl] Still running', i++)
+    if (i > 100) process.exit(0) // 10分钟后自动退出，避免真正卡死
+  }, 6000)
 }
