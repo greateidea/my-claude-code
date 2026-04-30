@@ -112,80 +112,6 @@ function checkAndRequestPermission(
   return { decision: 'allow' }
 }
 
-interface ToolExecutor {
-  execute(name: string, input: Record<string, any>): Promise<string>
-}
-
-interface ExecuteConfig {
-  cwd: string
-  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
-}
-
-async function* executeConcurrently(
-  calls: { id: string; name: string; input: Record<string, any> }[],
-  executor: ToolExecutor,
-  config: ExecuteConfig,
-): AsyncGenerator<{ type: 'tool' | 'permission'; toolUse?: { name: string; input: Record<string, string> }; toolResult?: string; permissionRequest?: PermissionRequest; permissionResponse?: PermissionResponse }> {
-  const MAX_CONCURRENCY = 10
-
-  const readyCalls: { tc: typeof calls[0]; result?: string }[] = []
-  const pendingPermission: { tc: typeof calls[0]; request: PermissionRequest }[] = []
-
-  for (const tc of calls) {
-    const permResult = checkAndRequestPermission(tc.name, tc.input, config.cwd, config.onPermissionRequest)
-
-    if (permResult.decision === 'deny') {
-      readyCalls.push({ tc, result: permResult.result! })
-    } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
-      pendingPermission.push({ tc, request: permResult.request! })
-    } else {
-      readyCalls.push({ tc })
-    }
-  }
-
-  for (const { tc, request } of pendingPermission) {
-    if (!config.onPermissionRequest) continue
-    yield { type: 'permission', permissionRequest: request }
-    const response = await config.onPermissionRequest(request)
-    yield { type: 'permission', permissionResponse: response }
-
-    if (response.allowed) {
-      permissionManager.addSessionRule(tc.name, tc.input, true)
-      readyCalls.push({ tc })
-    } else {
-      readyCalls.push({ tc, result: 'Permission denied by user' })
-    }
-  }
-
-  const running: Promise<{ tc: typeof calls[0]; result: string }>[] = []
-  const pending = new Set(readyCalls.filter(c => c.result === undefined).map(c => c.tc.id))
-  const queue = readyCalls.filter(c => c.result === undefined).map(c => c.tc)
-  let queueIndex = 0
-
-  while (pending.size > 0) {
-    while (running.length < MAX_CONCURRENCY && queueIndex < queue.length) {
-      const tc = queue[queueIndex++]
-      running.push((async () => {
-        const result = await executor.execute(tc.name, tc.input)
-        return { tc, result }
-      })())
-    }
-
-    if (running.length === 0) break
-
-    const done = await Promise.race(running)
-    const idx = running.findIndex(p => Promise.resolve(p) === Promise.resolve(done))
-    if (idx >= 0) running.splice(idx, 1)
-    pending.delete(done.tc.id)
-
-    yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: done.result }
-  }
-
-  for (const { tc, result } of readyCalls.filter(c => c.result !== undefined)) {
-    yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
-  }
-}
-
 const THINKING_REGEX = /<thinking>([\s\S]*?)<\/thinking>/gi
 
 export function extractThinkingContent(content: string): string | null {
@@ -298,19 +224,64 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       if (content) messages.push({ role: 'assistant', content })
       else if (thinking) messages.push({ role: 'assistant', content: rawContent })
 
-      // 使用 partitionToolCalls 统一决策并行/串行
+      // 使用 partitionToolCalls 决策并行/串行
       const batches = partitionToolCalls(allToolCalls)
       const cwd = config.cwd || process.cwd()
       
       for (const batch of batches) {
         if (batch.isConcurrencySafe && batch.calls.length > 1) {
-          // 真正的并行执行 - 按完成顺序 yield 结果
-          yield* executeConcurrently(batch.calls, toolExecutor, {
-            cwd,
-            onPermissionRequest: config.onPermissionRequest,
-          })
+          // 并行执行: 限制并发数为 10
+          const MAX_CONCURRENCY = 10
+          const pending = new Set(batch.calls.map(c => c.id))
+          const running: Promise<{ id: string; name: string; input: Record<string, any>; result: string }>[] = []
+          const queue = [...batch.calls]
+          let queueIndex = 0
+
+          while (pending.size > 0) {
+            while (running.length < MAX_CONCURRENCY && queueIndex < queue.length) {
+              const tc = queue[queueIndex++]
+              const permResult = checkAndRequestPermission(tc.name, tc.input, cwd, config.onPermissionRequest)
+              
+              if (permResult.decision === 'deny') {
+                yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: permResult.result! }
+                pending.delete(tc.id)
+              } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
+                yield { type: 'permission', permissionRequest: permResult.request }
+                const response = await config.onPermissionRequest(permResult.request!)
+                yield { type: 'permission', permissionResponse: response }
+                if (response.allowed) {
+                  permissionManager.addSessionRule(tc.name, tc.input, true)
+                  running.push((async () => ({
+                    id: tc.id,
+                    name: tc.name,
+                    input: tc.input,
+                    result: await toolExecutor.execute(tc.name, tc.input)
+                  }))())
+                } else {
+                  yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: 'Permission denied by user' }
+                  pending.delete(tc.id)
+                }
+              } else {
+                running.push((async () => ({
+                  id: tc.id,
+                  name: tc.name,
+                  input: tc.input,
+                  result: await toolExecutor.execute(tc.name, tc.input)
+                }))())
+              }
+            }
+
+            if (running.length === 0) break
+
+            const done = await Promise.race(running)
+            const idx = running.findIndex(p => Promise.resolve(p) === Promise.resolve(done))
+            if (idx >= 0) running.splice(idx, 1)
+            pending.delete(done.id)
+
+            yield { type: 'tool', toolUse: { name: done.name, input: done.input }, toolResult: done.result }
+          }
         } else {
-          // 串行执行 - 检查每个工具的权限
+          // 串行执行
           for (const tc of batch.calls) {
             const permResult = checkAndRequestPermission(tc.name, tc.input, cwd, config.onPermissionRequest)
             let result: string
@@ -318,28 +289,29 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
             if (permResult.decision === 'deny') {
               result = permResult.result!
             } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
-              try {
-                yield { type: 'permission', permissionRequest: permResult.request }
-                const response = await config.onPermissionRequest(permResult.request!)
-                yield { type: 'permission', permissionResponse: response }
-                if (!response.allowed) {
-                  result = 'Permission denied by user'
-                } else {
-                  permissionManager.addSessionRule(tc.name, tc.input, true)
-                  result = await toolExecutor.execute(tc.name, tc.input)
-                }
-              } catch (permError: any) {
-                result = `Permission error: ${permError.message || 'unknown'}`
+              yield { type: 'permission', permissionRequest: permResult.request }
+              const response = await config.onPermissionRequest(permResult.request!)
+              yield { type: 'permission', permissionResponse: response }
+              if (!response.allowed) {
+                result = 'Permission denied by user'
+              } else {
+                permissionManager.addSessionRule(tc.name, tc.input, true)
+                result = await toolExecutor.execute(tc.name, tc.input)
               }
             } else {
               result = await toolExecutor.execute(tc.name, tc.input)
             }
             
             yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
-            const toolResultContent = `<tool_result>\n${result}\n</tool_result>`
-            config.onMessage?.(toolResultContent, true)
-            messages.push({ role: 'user', content: toolResultContent })
           }
+        }
+        
+        // 发送工具结果到消息历史
+        const toolResultContent = batch.calls
+          .map(tc => `<tool_result>\n${tc.name}: done</tool_result>`)
+          .join('\n')
+        if (toolResultContent) {
+          messages.push({ role: 'user', content: toolResultContent })
         }
       }
     } catch (e) {
