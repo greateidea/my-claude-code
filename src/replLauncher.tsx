@@ -272,13 +272,22 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 使用 setImmediate 循环保持事件循环活跃
-  // 这是唯一有效的方式让进程持续运行
-  await new Promise(resolve => {
-    const run = () => {
-      // 什么也不做，但保持循环
-      setImmediate(run)
-    }
-    run()
+  // 用 setInterval 保持进程，Ctrl+C 可退出
+  const timer = setInterval(() => {}, 1000)
+  
+  process.on('SIGINT', () => {
+    clearInterval(timer)
+    process.exit(0)
   })
+  
+  process.on('SIGTERM', () => {
+    clearInterval(timer)
+    process.exit(0)
+  })
+
+  // 保持循环活跃
+  while (true) {
+    const target = Date.now() + 1000
+    while (Date.now() < target) {}
+  }
 }
