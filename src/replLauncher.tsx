@@ -260,14 +260,9 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
   ;(render as any)(app, {
     stdout: process.stdout,
     stdin: process.stdin,
+    exitOnClose: false,
   })
 
-  // 使用 setInterval 保持运行，防止 Promise 被 GC
-  const keepAlive = setInterval(() => {}, 1000)
-  
-  // 接受 Ctrl+C 优雅退出
-  process.on('SIGINT', () => {
-    clearInterval(keepAlive)
-    process.exit(0)
-  })
+  // 阻塞等待，防止进程退出
+  await new Promise(() => {})
 }
