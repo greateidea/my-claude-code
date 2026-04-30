@@ -260,10 +260,11 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     </AppStateProvider>
   )
 
-  ;(render as any)(app, {
+  const { unmount } = (render as any)(app, {
     stdout: process.stdout,
     stdin: process.stdin,
   })
 
-  await new Promise(() => {})
+  // 保持程序运行
+  return new Promise(() => {})
 }
