@@ -4,6 +4,7 @@ export interface ToolCall {
   id: string
   name: string
   input: ToolInput
+  apiId?: string // Original tool_call_id from OpenAI API (needed for role:'tool' responses)
 }
 
 export interface ToolResult {

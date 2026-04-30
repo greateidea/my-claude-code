@@ -7,6 +7,7 @@ import { createQueryLoop, type Tool } from './services/queryLoop'
 import { AVAILABLE_TOOLS } from './tools'
 import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
 import type { PermissionRequest, PermissionResponse } from './services/permissions'
+import { permissionManager } from './services/permissions'
 
 function toolToOpenAI(tool: Tool): any {
   return {
@@ -72,6 +73,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   const [currentTool, setCurrentTool] = useState<string | null>(null)
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const permissionResolveRef = useRef<((response: PermissionResponse) => void) | null>(null)
+  const currentPermissionRef = useRef<{ toolName: string; toolInput: Record<string, any> } | null>(null)
   const apiRef = useRef<DeepSeekClient | null>(null)
   const messagesRef = useRef(messages)
   const initialized = useRef(false)
@@ -83,6 +85,14 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
 
   const handlePermissionResponse = useCallback((allowed: boolean) => {
     if (permissionResolveRef.current) {
+      // Remember permission to avoid re-prompting the same tool+input this session
+      if (allowed && currentPermissionRef.current) {
+        permissionManager.addSessionRule(
+          currentPermissionRef.current.toolName,
+          currentPermissionRef.current.toolInput,
+          true,
+        )
+      }
       permissionResolveRef.current({
         allowed,
         option: allowed ? 'allow_once' : 'reject_once',
@@ -135,6 +145,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         onMessage: () => {},
         cwd: cwd,
         onPermissionRequest: async (request) => {
+          currentPermissionRef.current = { toolName: request.toolName, toolInput: request.toolInput }
           return new Promise((resolve) => {
             setPendingPermission(request)
             permissionResolveRef.current = resolve

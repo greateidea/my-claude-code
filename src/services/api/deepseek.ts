@@ -2,8 +2,14 @@ import { default as OpenAI } from 'openai'
 import type { Message } from '../../state/AppStateStore'
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  tool_call_id?: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
 }
 
 export interface ChatOptions {
@@ -54,7 +60,7 @@ export class DeepSeekClient {
 
     const response = await this.client.chat.completions.create({
       model: options.model || DEFAULT_MODEL,
-      messages: options.messages,
+      messages: options.messages as any,
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       ...(options.tools && { tools: options.tools }),
@@ -87,7 +93,7 @@ export class DeepSeekClient {
 
     const response = await this.client.chat.completions.create({
       model: options.model || DEFAULT_MODEL,
-      messages: options.messages,
+      messages: options.messages as any,
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       stream: true,

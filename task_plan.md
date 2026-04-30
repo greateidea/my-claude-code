@@ -61,9 +61,16 @@
 - [x] FileWriteTool (写入文件)
 - [x] GlobTool (文件搜索)
 
-### Phase 10: 工具权限机制
-- [ ] 工具权限确认 UI
-- [ ] 权限状态管理
+### Phase 10: 工具权限机制 ✅ COMPLETED
+- [x] 工具权限确认 UI (PermissionConfirm 组件, 方向键选择, Enter 确认, Esc 拒绝)
+- [x] 权限状态管理 (PermissionManager: 规则系统, 模式切换, 会话记忆)
+- [x] 只读工具自动允许 (Read, Glob, Grep — 无需确认)
+- [x] 只读 bash 命令自动允许 (ls, cat, grep, find, git status/log/diff 等)
+- [x] 权限规则匹配 (支持 Bash(命令), Write(路径), Edit(路径), WebFetch(domain:域名) 等模式)
+- [x] 权限模式支持 (default, acceptEdits, plan, dontAsk, bypassPermissions)
+- [x] 会话级权限记忆 (addSessionRule — 同一 session 内相同工具+参数不再重复询问)
+- [x] 工具并行执行时的权限串行检查 (避免并发权限对话框)
+- [x] 与 queryLoop 和 replLauncher 的完整集成
 
 ---
 
@@ -96,27 +103,25 @@
 
 ---
 
-## 当前状态 (2024-04-19)
+## 当前状态 (2026-04-30)
 
-### 已完成
-- CLI 框架 + Ink UI
-- 状态管理
-- REPL 界面 (带闪烁光标)
-- API 对话 (qwen 模型)
-- 核心循环 queryLoop (async generator)
-- 工具系统 (zod schema)
-- 部分工具调用完成
+### 已完成 (Phase 1-10)
+- CLI 框架 + Ink UI + REPL 界面
+- Zustand-style 状态管理 (useSyncExternalStore)
+- NVIDIA API 对话 (qwen/qwen3-next-80b-a3b-thinking)
+- 核心循环 queryLoop (async generator, 含 thinking 提取和流式输出)
+- 工具系统 (Bash, Read, Write, Glob, Calculate + zod schema + 并发安全标记)
+- 工具编排 (Semaphore 控制, 串行/并发自动分区, max 10 并发)
+- 完整权限机制 (PermissionManager + PermissionConfirm UI)
+- 会话权限记忆 (避免同一操作重复弹窗)
+- Native tool calling 支持 (正确发送 tool_calls 和 tool result 消息)
+- 进程生命周期管理 (Ctrl+C 退出, setInterval 保持活跃)
 
-### 进行中
-- 循环集成到 REPL
+### 当前焦点
+Phase 11: 上下文管理与高级功能
 
 ### 待完成
-- 工具: Bash, FileRead, FileWrite
-- 权限 UI
-- 上下文压缩
-- 文档完善
-
----
-
-## 下一步
-Phase 8: 完成 REPL 循环集成，添加更多工具
+- CLAUDE.md 项目上下文加载
+- 对话历史压缩 (context window 管理)
+- MCP 客户端集成
+- Agent tool (子进程管理)

@@ -40,7 +40,10 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
       }
 
       if (char === '\x03') {
-        // Ctrl+C - 不要退出，只是清除输入
+        // Ctrl+C — exit on empty input, clear otherwise
+        if (!currentInput.trim()) {
+          process.exit(0)
+        }
         setInput('')
         return
       }

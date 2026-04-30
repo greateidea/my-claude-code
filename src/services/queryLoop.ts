@@ -147,9 +147,10 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       
       const response = await config.client.chat(chatOptions)
       
-      const apiToolCalls: { name: string; input: Record<string, any> }[] = (response.toolCalls || []).map((tc: any) => ({
+      const apiToolCalls: { name: string; input: Record<string, any>; apiId?: string }[] = (response.toolCalls || []).map((tc: any) => ({
         name: tc.name,
         input: JSON.parse(tc.arguments),
+        apiId: tc.id,
       }))
       
       const rawContent = response.message.content ?? ''
@@ -159,6 +160,7 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
         id: `call_${turnCount}_${i}`,
         name: tc.name,
         input: tc.input as any,
+        apiId: (tc as any).apiId,
       }))
 
       if (allToolCalls.length === 0) {
@@ -183,8 +185,25 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       const content = stripThinkingContent(rawContent)
       config.onMessage?.(content, false)
       yield { type: 'message', content }
-      if (content) messages.push({ role: 'assistant', content })
-      else if (thinking) messages.push({ role: 'assistant', content: rawContent })
+
+      // Store assistant message — WITH tool_calls for native API calls so the model
+      // recognizes its own tool calls. Without this, the model sees orphaned tool results
+      // and re-requests the same tool indefinitely.
+      if (response.toolCalls?.length) {
+        messages.push({
+          role: 'assistant',
+          content: content || '',
+          tool_calls: response.toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        })
+      } else if (content) {
+        messages.push({ role: 'assistant', content })
+      } else if (thinking) {
+        messages.push({ role: 'assistant', content: rawContent })
+      }
 
       // 委托给 toolOrchestration 处理并行/串行执行
       const permissionHandler = config.onPermissionRequest ? {
@@ -213,10 +232,17 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
           // 工具开始执行，记录但不 yield 结果
           config.onMessage?.(`[tool] ${step.toolCall?.name}`, true)
         } else if (step.type === 'result') {
-          yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any }, toolResult: step.result }
-          const toolResultContent = `<tool_result>\n${step.result}\n</tool_result>`
-          config.onMessage?.(toolResultContent, true)
-          messages.push({ role: 'user', content: toolResultContent })
+          yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any }, toolResult: step.result! }
+          const apiId = step.toolCall?.apiId
+          if (apiId) {
+            // Native tool call — use proper tool role with tool_call_id
+            messages.push({ role: 'tool', tool_call_id: apiId, content: step.result! })
+          } else {
+            // Text-parsed tool call — fall back to user role with XML wrapper
+            const toolResultContent = `<tool_result>\n${step.result!}\n</tool_result>`
+            messages.push({ role: 'user', content: toolResultContent })
+          }
+          config.onMessage?.(step.result!, true)
         } else if (step.type === 'error') {
           yield { type: 'error', content: step.error }
         } else if (step.type === 'permission') {
