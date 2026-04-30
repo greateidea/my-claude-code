@@ -272,5 +272,13 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  await new Promise(() => {})
+  // 使用 setImmediate 循环保持事件循环活跃
+  // 这是唯一有效的方式让进程持续运行
+  await new Promise(resolve => {
+    const run = () => {
+      // 什么也不做，但保持循环
+      setImmediate(run)
+    }
+    run()
+  })
 }
