@@ -1,4 +1,3 @@
-import { z } from 'zod'
 import { AVAILABLE_TOOLS, findToolByName, type Tool, type ToolInput } from '../tools'
 
 export interface ToolCall {
@@ -16,15 +15,36 @@ export interface ToolResult {
 }
 
 export interface ToolExecutionStep {
-  type: 'tool' | 'result' | 'error'
+  type: 'tool' | 'result' | 'error' | 'permission' | 'permission_response'
   toolCall?: ToolCall
   result?: string
   error?: string
+  permissionRequest?: {
+    toolName: string
+    toolInput: Record<string, any>
+    title: string
+    description: string
+  }
+  permissionResponse?: {
+    allowed: boolean
+    option: string
+  }
 }
 
-interface ToolBatch {
+export interface ToolBatch {
   isConcurrencySafe: boolean
   calls: ToolCall[]
+}
+
+export interface PermissionCheckResult {
+  decision: 'allow' | 'deny' | 'ask'
+  rule?: string
+  result?: string
+}
+
+export interface PermissionHandler {
+  check: (toolName: string, toolInput: Record<string, any>, cwd: string) => PermissionCheckResult
+  request: (request: { toolName: string; toolInput: Record<string, any>; title: string; description: string }) => Promise<{ allowed: boolean; option: string }>
 }
 
 class Semaphore {
@@ -56,45 +76,6 @@ class Semaphore {
   }
 }
 
-function parseToolCalls(content: string): ToolCall[] {
-  const results: ToolCall[] = []
-  
-  // 解析 JSON 格式的工具调用: {"name": "bash", "arguments": {...}}
-  const jsonRegex = /<tool_call>\s*(\w+)\s*\{([^}]+)\}\s*<\/tool_call>/g
-  let match
-  while ((match = jsonRegex.exec(content)) !== null) {
-    const name = match[1]
-    try {
-      const args = JSON.parse('{' + match[2] + '}')
-      results.push({
-        id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name,
-        input: args,
-      })
-    } catch {}
-  }
-
-  // 解析 XML 格式的工具调用
-  const xmlRegex = /<tool name="(\w+)">([\s\S]*?)<\/tool>/g
-  while ((match = xmlRegex.exec(content)) !== null) {
-    const name = match[1]
-    const body = match[2]
-    const input: Record<string, string> = {}
-    const paramRegex = /<param name="([^"]+)">([^<]+)<\/param>/g
-    let paramMatch
-    while ((paramMatch = paramRegex.exec(body)) !== null) {
-      input[paramMatch[1]] = paramMatch[2]
-    }
-    results.push({
-      id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name,
-      input,
-    })
-  }
-
-  return results
-}
-
 function isInputConcurrencySafe(tool: Tool | undefined, input: ToolInput): boolean {
   if (!tool?.isConcurrencySafe) return false
   try {
@@ -119,53 +100,11 @@ export function partitionToolCalls(calls: ToolCall[]): ToolBatch[] {
 }
 
 const MAX_CONCURRENCY = 10
-const semaphore = new Semaphore(MAX_CONCURRENCY)
 
-async function* all<T>(
-  generators: AsyncGenerator<T>[],
-  concurrency: number,
-): AsyncGenerator<T> {
-  const sem = new Semaphore(concurrency)
-  const active: Promise<{ done: boolean; value: T }>[] = []
-  const genDone = new Set<number>()
-
-  function runGen(index: number, gen: AsyncGenerator<T>): Promise<{ done: boolean; value: T }> {
-    return (async () => {
-      try {
-        const result = await gen.next()
-        if (result.done) {
-          genDone.add(index)
-        }
-        return { done: Boolean(result.done), value: result.value as T }
-      } finally {
-        sem.release()
-      }
-    })()
-  }
-
-  for (let i = 0; i < generators.length; i++) {
-    if (active.length >= concurrency) {
-      const result = await Promise.race(active)
-      if (!result.done) {
-        yield result.value
-      }
-    }
-    
-    await sem.acquire()
-    active.push(runGen(i, generators[i]))
-  }
-
-  while (active.length > 0) {
-    const result = await Promise.race(active)
-    if (!result.done) {
-      yield result.value
-    }
-    const idx = active.findIndex(p => p === Promise.resolve(result))
-    if (idx >= 0) active.splice(idx, 1)
-  }
-}
-
-async function executeSingleTool(call: ToolCall): Promise<ToolResult> {
+async function executeSingleTool(
+  call: ToolCall,
+  executeFn: (name: string, input: Record<string, any>) => Promise<string>
+): Promise<ToolResult> {
   const tool = findToolByName(AVAILABLE_TOOLS, call.name)
   
   if (!tool) {
@@ -179,7 +118,7 @@ async function executeSingleTool(call: ToolCall): Promise<ToolResult> {
   }
 
   try {
-    const result = await tool.execute(call.input)
+    const result = await executeFn(call.name, call.input as Record<string, any>)
     return { id: call.id, name: call.name, input: call.input, result }
   } catch (e: any) {
     return {
@@ -192,22 +131,66 @@ async function executeSingleTool(call: ToolCall): Promise<ToolResult> {
   }
 }
 
-async function* executeToolsSerially(
+export async function* executeToolsSerially(
   calls: ToolCall[],
+  executeFn: (name: string, input: Record<string, any>) => Promise<string>,
+  permissionHandler?: PermissionHandler,
+  cwd?: string,
 ): AsyncGenerator<ToolExecutionStep> {
   for (const call of calls) {
     yield { type: 'tool', toolCall: call }
-    const result = await executeSingleTool(call)
-    if (result.error) {
-      yield { type: 'error', error: result.error, toolCall: call }
+    
+    let result: string
+    
+    if (permissionHandler) {
+      const permResult = permissionHandler.check(call.name, call.input as Record<string, any>, cwd || process.cwd())
+      
+      if (permResult.decision === 'deny') {
+        result = permResult.result || 'Permission denied'
+      } else if (permResult.decision === 'ask' && permissionHandler.request) {
+        yield {
+          type: 'permission',
+          permissionRequest: {
+            toolName: call.name,
+            toolInput: call.input as Record<string, any>,
+            title: call.name,
+            description: JSON.stringify(call.input),
+          }
+        }
+        
+        const response = await permissionHandler.request({
+          toolName: call.name,
+          toolInput: call.input as Record<string, any>,
+          title: call.name,
+          description: JSON.stringify(call.input),
+        })
+        
+        yield { type: 'permission_response', permissionResponse: response }
+        
+        if (!response.allowed) {
+          result = 'Permission denied by user'
+        } else {
+          const execResult = await executeFn(call.name, call.input as Record<string, any>)
+          result = execResult
+        }
+      } else {
+        const execResult = await executeFn(call.name, call.input as Record<string, any>)
+        result = execResult
+      }
     } else {
-      yield { type: 'result', result: result.result, toolCall: call }
+      const execResult = await executeFn(call.name, call.input as Record<string, any>)
+      result = execResult
     }
+
+    yield { type: 'result', result, toolCall: call }
   }
 }
 
-async function* executeToolsConcurrently(
+export async function* executeToolsConcurrently(
   calls: ToolCall[],
+  executeFn: (name: string, input: Record<string, any>) => Promise<string>,
+  permissionHandler?: PermissionHandler,
+  cwd?: string,
 ): AsyncGenerator<ToolExecutionStep> {
   const sem = new Semaphore(MAX_CONCURRENCY)
 
@@ -215,29 +198,92 @@ async function* executeToolsConcurrently(
     await sem.acquire()
     try {
       yield { type: 'tool', toolCall: call }
-      const result = await executeSingleTool(call)
-      if (result.error) {
-        yield { type: 'error', error: result.error, toolCall: call }
+      
+      let result: string
+      
+      if (permissionHandler) {
+        const permResult = permissionHandler.check(call.name, call.input as Record<string, any>, cwd || process.cwd())
+        
+        if (permResult.decision === 'deny') {
+          result = permResult.result || 'Permission denied'
+        } else if (permResult.decision === 'ask' && permissionHandler.request) {
+          yield {
+            type: 'permission',
+            permissionRequest: {
+              toolName: call.name,
+              toolInput: call.input as Record<string, any>,
+              title: call.name,
+              description: JSON.stringify(call.input),
+            }
+          }
+          
+          const response = await permissionHandler.request({
+            toolName: call.name,
+            toolInput: call.input as Record<string, any>,
+            title: call.name,
+            description: JSON.stringify(call.input),
+          })
+          
+          yield { type: 'permission_response', permissionResponse: response }
+          
+          if (!response.allowed) {
+            result = 'Permission denied by user'
+          } else {
+            const execResult = await executeFn(call.name, call.input as Record<string, any>)
+            result = execResult
+          }
+        } else {
+          const execResult = await executeFn(call.name, call.input as Record<string, any>)
+          result = execResult
+        }
       } else {
-        yield { type: 'result', result: result.result, toolCall: call }
+        const execResult = await executeFn(call.name, call.input as Record<string, any>)
+        result = execResult
       }
+
+      yield { type: 'result', result, toolCall: call }
     } finally {
       sem.release()
     }
   }
 
   const generators = calls.map(call => runWithSemaphore(call))
+  
+  const active: Promise<{ done: boolean; value: ToolExecutionStep }>[] = []
+  const pending = new Set(calls.map(c => c.id))
+  
+  for (const gen of generators) {
+    if (active.length >= MAX_CONCURRENCY) {
+      const result = await Promise.race(active)
+      if (!result.done) {
+        yield result.value
+        const doneIdx = active.findIndex(p => Promise.resolve(p) === Promise.resolve(result))
+        if (doneIdx >= 0) active.splice(doneIdx, 1)
+      }
+    }
+    
+    active.push((async () => {
+      const r = await gen.next()
+      return { done: r.done || false, value: r.value as ToolExecutionStep }
+    })())
+  }
 
-  for await (const step of all(generators, MAX_CONCURRENCY)) {
-    yield step
+  while (active.length > 0) {
+    const result = await Promise.race(active)
+    if (!result.done) {
+      yield result.value
+    }
+    const doneIdx = active.findIndex(p => Promise.resolve(p) === Promise.resolve(result))
+    if (doneIdx >= 0) active.splice(doneIdx, 1)
   }
 }
 
 export async function* runToolCalls(
-  content: string,
+  calls: ToolCall[],
+  executeFn: (name: string, input: Record<string, any>) => Promise<string>,
+  permissionHandler?: PermissionHandler,
+  cwd?: string,
 ): AsyncGenerator<ToolExecutionStep> {
-  const calls = parseToolCalls(content)
-  
   if (calls.length === 0) {
     return
   }
@@ -246,13 +292,9 @@ export async function* runToolCalls(
 
   for (const batch of batches) {
     if (batch.isConcurrencySafe && batch.calls.length > 1) {
-      yield* executeToolsConcurrently(batch.calls)
+      yield* executeToolsConcurrently(batch.calls, executeFn, permissionHandler, cwd)
     } else {
-      yield* executeToolsSerially(batch.calls)
+      yield* executeToolsSerially(batch.calls, executeFn, permissionHandler, cwd)
     }
   }
-}
-
-export function hasToolCalls(content: string): boolean {
-  return parseToolCalls(content).length > 0
 }
