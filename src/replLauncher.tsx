@@ -250,6 +250,16 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
 
 export async function launchRepl(options?: { prompt?: string; continue?: boolean }): Promise<void> {
   const { render } = await import('ink')
+
+  // 监听所有可能的退出事件
+  const beforeExit = () => console.error('>>> beforeExit')
+  const exit = (code: number) => console.error('>>> exit:', code)
+  const uncaught = (e: Error) => console.error('>>> uncaught:', e.message)
+  
+  process.on('beforeExit', beforeExit)
+  process.on('exit', exit)
+  process.on('uncaughtException', uncaught)
+  process.on('unhandledRejection', uncaught)
   
   const app = (
     <AppStateProvider>
@@ -262,6 +272,5 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 阻塞等待
   await new Promise(() => {})
 }
