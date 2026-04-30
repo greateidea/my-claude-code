@@ -30,7 +30,7 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
     const handleData = (chunk: Buffer) => {
       const char = chunk.toString()
       const currentInput = inputRef.current
-      
+
       if (char === '\r' || char === '\n') {
         if (currentInput.trim()) {
           onSubmit(currentInput)
@@ -38,21 +38,22 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
         }
         return
       }
-      
+
       if (char === '\x03') {
-        process.exit(0)
+        // Ctrl+C - 不要退出，只是清除输入
+        setInput('')
         return
       }
-      
+
       if (char === '\x7f' || char === '\x08') {
         setInput(prev => prev.slice(0, -1))
         return
       }
-      
+
       if (char.startsWith('\x1b')) {
         return
       }
-      
+
       if (char.length > 0) {
         setInput(prev => prev + char)
       }
@@ -60,7 +61,6 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
 
     try {
       ;(process.stdin as any).setRawMode?.(true)
-      process.stdin.resume()
       process.stdin.setEncoding('utf8')
       process.stdin.on('data', handleData)
     } catch (e) {
@@ -70,11 +70,10 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
     return () => {
       try {
         ;(process.stdin as any).setRawMode?.(false)
-        process.stdin.pause()
         process.stdin.removeListener('data', handleData)
       } catch (e) {}
     }
-  }, [isTTY, disabled])
+  }, [isTTY, disabled, onSubmit])
 
   if (!isTTY || disabled) {
     return (
