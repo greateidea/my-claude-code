@@ -18,16 +18,23 @@ export const PermissionConfirm: React.FC<PermissionConfirmProps> = ({ request, o
   useInput((input, key) => {
     if (key.upArrow) {
       setSelected((s) => Math.max(0, s - 1))
-    } else if (key.downArrow) {
+      return
+    }
+    if (key.downArrow) {
       setSelected((s) => Math.min(options.length - 1, s + 1))
-    } else if (key.return) {
+      return
+    }
+    if (key.return) {
       const option = options[selected]
       onResponse({
         allowed: option.value === 'allow_once',
         option: option.value,
       })
-    } else if (key.escape) {
+      return
+    }
+    if (key.escape) {
       onResponse({ allowed: false, option: 'reject_once' })
+      return
     }
   })
 
