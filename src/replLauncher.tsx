@@ -272,22 +272,12 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 用 setInterval 保持进程，Ctrl+C 可退出
-  const timer = setInterval(() => {}, 1000)
+  // 方式1: setInterval - 保持定时器引用
+  const timer = setInterval(function() {}, 0)
   
-  process.on('SIGINT', () => {
+  // 方式2: 监听信号退出
+  process.on('SIGINT', function() {
     clearInterval(timer)
     process.exit(0)
   })
-  
-  process.on('SIGTERM', () => {
-    clearInterval(timer)
-    process.exit(0)
-  })
-
-  // 保持循环活跃
-  while (true) {
-    const target = Date.now() + 1000
-    while (Date.now() < target) {}
-  }
 }
