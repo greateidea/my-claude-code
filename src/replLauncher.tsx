@@ -207,6 +207,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       setError(errMsg)
     } finally {
       setLoading(false)
+      console.error('[handleSend] Done')
     }
   }, [])
 
@@ -261,8 +262,12 @@ export async function launchRepl(options?: { prompt?: string; continue?: boolean
     stdin: process.stdin,
   })
 
-  // 保持程序运行 - 使用阻塞循环
-  while (true) {
-    await new Promise(resolve => setTimeout(resolve, 100))
-  }
+  // 使用 setInterval 保持运行，防止 Promise 被 GC
+  const keepAlive = setInterval(() => {}, 1000)
+  
+  // 接受 Ctrl+C 优雅退出
+  process.on('SIGINT', () => {
+    clearInterval(keepAlive)
+    process.exit(0)
+  })
 }

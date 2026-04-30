@@ -21,7 +21,6 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
   }, [input])
 
   useEffect(() => {
-    console.error('[PromptInput] stdin.isTTY:', process.stdin.isTTY)
     setIsTTY(process.stdin.isTTY === true)
   }, [])
 
