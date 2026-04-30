@@ -192,89 +192,85 @@ export async function* executeToolsConcurrently(
   permissionHandler?: PermissionHandler,
   cwd?: string,
 ): AsyncGenerator<ToolExecutionStep> {
-  const sem = new Semaphore(MAX_CONCURRENCY)
-
-  async function* runWithSemaphore(call: ToolCall): AsyncGenerator<ToolExecutionStep> {
-    await sem.acquire()
-    try {
-      yield { type: 'tool', toolCall: call }
+  // 阶段1: 串行检查所有权限 (避免并发权限对话框)
+  const readyCalls: Array<{ call: ToolCall; result?: string }> = []
+  
+  for (const call of calls) {
+    if (permissionHandler) {
+      const permResult = permissionHandler.check(call.name, call.input as Record<string, any>, cwd || process.cwd())
       
-      let result: string
-      
-      if (permissionHandler) {
-        const permResult = permissionHandler.check(call.name, call.input as Record<string, any>, cwd || process.cwd())
-        
-        if (permResult.decision === 'deny') {
-          result = permResult.result || 'Permission denied'
-        } else if (permResult.decision === 'ask' && permissionHandler.request) {
-          yield {
-            type: 'permission',
-            permissionRequest: {
-              toolName: call.name,
-              toolInput: call.input as Record<string, any>,
-              title: call.name,
-              description: JSON.stringify(call.input),
-            }
-          }
-          
-          const response = await permissionHandler.request({
+      if (permResult.decision === 'deny') {
+        yield { type: 'tool', toolCall: call }
+        yield { type: 'result', result: permResult.result || 'Permission denied', toolCall: call }
+      } else if (permResult.decision === 'ask' && permissionHandler.request) {
+        yield {
+          type: 'permission',
+          permissionRequest: {
             toolName: call.name,
             toolInput: call.input as Record<string, any>,
             title: call.name,
             description: JSON.stringify(call.input),
-          })
-          
-          yield { type: 'permission_response', permissionResponse: response }
-          
-          if (!response.allowed) {
-            result = 'Permission denied by user'
-          } else {
-            const execResult = await executeFn(call.name, call.input as Record<string, any>)
-            result = execResult
           }
+        }
+        
+        const response = await permissionHandler.request({
+          toolName: call.name,
+          toolInput: call.input as Record<string, any>,
+          title: call.name,
+          description: JSON.stringify(call.input),
+        })
+        
+        yield { type: 'permission_response', permissionResponse: response }
+        
+        if (response.allowed) {
+          readyCalls.push({ call })
         } else {
-          const execResult = await executeFn(call.name, call.input as Record<string, any>)
-          result = execResult
+          yield { type: 'tool', toolCall: call }
+          yield { type: 'result', result: 'Permission denied by user', toolCall: call }
         }
       } else {
-        const execResult = await executeFn(call.name, call.input as Record<string, any>)
-        result = execResult
+        readyCalls.push({ call })
       }
-
-      yield { type: 'result', result, toolCall: call }
-    } finally {
-      sem.release()
+    } else {
+      readyCalls.push({ call })
     }
   }
 
-  const generators = calls.map(call => runWithSemaphore(call))
-  
-  const active: Promise<{ done: boolean; value: ToolExecutionStep }>[] = []
-  const pending = new Set(calls.map(c => c.id))
-  
-  for (const gen of generators) {
-    if (active.length >= MAX_CONCURRENCY) {
-      const result = await Promise.race(active)
-      if (!result.done) {
-        yield result.value
-        const doneIdx = active.findIndex(p => Promise.resolve(p) === Promise.resolve(result))
-        if (doneIdx >= 0) active.splice(doneIdx, 1)
-      }
-    }
-    
-    active.push((async () => {
-      const r = await gen.next()
-      return { done: r.done || false, value: r.value as ToolExecutionStep }
-    })())
-  }
+  // 阶段2: 并行执行已获授权的工具
+  if (readyCalls.length === 0) return
 
-  while (active.length > 0) {
-    const result = await Promise.race(active)
-    if (!result.done) {
-      yield result.value
+  const sem = new Semaphore(MAX_CONCURRENCY)
+  const pendingCalls = [...readyCalls]
+  const running: Array<{
+    call: ToolCall
+    promise: Promise<ToolExecutionStep>
+  }> = []
+
+  while (pendingCalls.length > 0 || running.length > 0) {
+    while (pendingCalls.length > 0 && running.length < MAX_CONCURRENCY) {
+      const { call } = pendingCalls.shift()!
+      
+      const task = (async (): Promise<ToolExecutionStep> => {
+        await sem.acquire()
+        try {
+          const execResult = await executeFn(call.name, call.input as Record<string, any>)
+          return { type: 'result' as const, result: execResult, toolCall: call }
+        } finally {
+          sem.release()
+        }
+      })()
+
+      running.push({ call, promise: task })
     }
-    const doneIdx = active.findIndex(p => Promise.resolve(p) === Promise.resolve(result))
-    if (doneIdx >= 0) active.splice(doneIdx, 1)
+
+    if (running.length === 0) break
+
+    const done = await Promise.race(running.map(r => r.promise))
+    const doneIndex = running.findIndex(r => r.promise === Promise.resolve(done))
+    if (doneIndex >= 0) running.splice(doneIndex, 1)
+
+    yield { type: 'tool', toolCall: done.toolCall }
+    yield done
   }
 }
 
