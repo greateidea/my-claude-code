@@ -128,32 +128,47 @@ async function* executeConcurrently(
 ): AsyncGenerator<{ type: 'tool' | 'permission'; toolUse?: { name: string; input: Record<string, string> }; toolResult?: string; permissionRequest?: PermissionRequest; permissionResponse?: PermissionResponse }> {
   const MAX_CONCURRENCY = 10
 
-  async function executeOne(
-    tc: { id: string; name: string; input: Record<string, any> }
-  ): Promise<{ tc: { id: string; name: string; input: Record<string, any> }; result: string }> {
+  const readyCalls: { tc: typeof calls[0]; result?: string }[] = []
+  const pendingPermission: { tc: typeof calls[0]; request: PermissionRequest }[] = []
+
+  for (const tc of calls) {
     const permResult = checkAndRequestPermission(tc.name, tc.input, config.cwd, config.onPermissionRequest)
-    let result: string
 
     if (permResult.decision === 'deny') {
-      result = permResult.result!
+      readyCalls.push({ tc, result: permResult.result! })
     } else if (permResult.decision === 'ask' && config.onPermissionRequest) {
-      result = 'Permission requires response'
+      pendingPermission.push({ tc, request: permResult.request! })
     } else {
-      result = await executor.execute(tc.name, tc.input)
+      readyCalls.push({ tc })
     }
-
-    return { tc, result }
   }
 
-  const running: Promise<{ tc: { id: string; name: string; input: Record<string, any> }; result: string }>[] = []
-  const pending = new Set(calls.map(c => c.id))
-  const queue = [...calls]
+  for (const { tc, request } of pendingPermission) {
+    if (!config.onPermissionRequest) continue
+    yield { type: 'permission', permissionRequest: request }
+    const response = await config.onPermissionRequest(request)
+    yield { type: 'permission', permissionResponse: response }
+
+    if (response.allowed) {
+      permissionManager.addSessionRule(tc.name, tc.input, true)
+      readyCalls.push({ tc })
+    } else {
+      readyCalls.push({ tc, result: 'Permission denied by user' })
+    }
+  }
+
+  const running: Promise<{ tc: typeof calls[0]; result: string }>[] = []
+  const pending = new Set(readyCalls.filter(c => c.result === undefined).map(c => c.tc.id))
+  const queue = readyCalls.filter(c => c.result === undefined).map(c => c.tc)
   let queueIndex = 0
 
   while (pending.size > 0) {
     while (running.length < MAX_CONCURRENCY && queueIndex < queue.length) {
       const tc = queue[queueIndex++]
-      running.push(executeOne(tc))
+      running.push((async () => {
+        const result = await executor.execute(tc.name, tc.input)
+        return { tc, result }
+      })())
     }
 
     if (running.length === 0) break
@@ -163,23 +178,11 @@ async function* executeConcurrently(
     if (idx >= 0) running.splice(idx, 1)
     pending.delete(done.tc.id)
 
-    const permResult = checkAndRequestPermission(done.tc.name, done.tc.input, config.cwd, config.onPermissionRequest)
+    yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: done.result }
+  }
 
-    if (permResult.decision === 'ask' && config.onPermissionRequest) {
-      yield { type: 'permission', permissionRequest: permResult.request }
-      const response = await config.onPermissionRequest(permResult.request!)
-      yield { type: 'permission', permissionResponse: response }
-
-      if (response.allowed) {
-        permissionManager.addSessionRule(done.tc.name, done.tc.input, true)
-        const result = await executor.execute(done.tc.name, done.tc.input)
-        yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: result }
-      } else {
-        yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: 'Permission denied by user' }
-      }
-    } else {
-      yield { type: 'tool', toolUse: { name: done.tc.name, input: done.tc.input }, toolResult: done.result }
-    }
+  for (const { tc, result } of readyCalls.filter(c => c.result !== undefined)) {
+    yield { type: 'tool', toolUse: { name: tc.name, input: tc.input }, toolResult: result }
   }
 }
 
