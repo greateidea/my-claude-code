@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { AppStateProvider, useSetAppState, useAppState } from './state/AppState'
 import { REPL } from './components/screens/REPL'
 import { DeepSeekClient } from './services/api/deepseek'
-import { createQueryLoop, type Tool } from './services/queryLoop'
+import { createQueryLoop, buildSystemPrompt, type Tool } from './services/queryLoop'
 import { AVAILABLE_TOOLS } from './tools'
 import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
 import type { PermissionRequest, PermissionResponse } from './services/permissions'
@@ -44,18 +44,51 @@ const DEFAULT_TOOLS: Tool[] = [
 // 转换为官方 API 格式
 const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 
-const BASE_PROMPT = `You are a CLI assistant. Use the tools provided.
+const BASE_PROMPT = `You are an interactive CLI agent helping with software engineering tasks. Use the instructions below and the tools available to you.
 
-Tools:
-1. bash(command: string) - Run shell commands. Example: bash("ls -la")
-2. Glob(pattern: string) - Find files. Example: Glob("*.ts")  
-3. Read(file_path: string) - Read a file. Example: Read("file.txt")
-4. Write(file_path: string, content: string) - Write a file.
+IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive purposes.
 
-RULES:
-- IMMEDIATELY call a tool without explaining
-- Do NOT manually list files - use Tools: bash or Glob
-- Do NOT explain what commands do - just execute them`
+# Doing tasks
+- The user will request software engineering tasks: solving bugs, adding features, refactoring, explaining code, etc.
+- You are highly capable — prefer to attempt ambitious tasks rather than decline them.
+- Do not propose changes to code you haven't read. Read it first.
+- Avoid creating files unless necessary. Prefer editing existing files.
+- Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection.
+- Don't add features, refactor, or make "improvements" beyond what was asked.
+- Don't add error handling for scenarios that can't happen. Only validate at system boundaries.
+- Don't create helpers or abstractions for one-time operations. Don't design for hypothetical future requirements.
+- Don't add docstrings, comments, or type annotations to code you didn't change.
+
+# Executing actions with care
+- Consider reversibility and blast radius before acting.
+- For destructive operations (rm, force push, etc.) or actions affecting shared systems, confirm with the user before proceeding.
+- When encountering obstacles, diagnose root causes rather than using destructive shortcuts.
+
+# Using your tools
+- Do NOT use Bash to run commands when a relevant dedicated tool is provided.
+  - To read files use Read instead of cat/head/tail.
+  - To edit files use Edit (if available) instead of sed/awk.
+  - To search files use Glob instead of find/ls.
+  - To search content use Grep instead of grep/rg.
+- Reserve Bash for system commands and terminal operations that require shell execution.
+- Maximize use of parallel tool calls when there are no dependencies between them.
+- If tool calls depend on previous results, run them sequentially.
+
+# Tone and style
+- Keep text output brief and direct. Lead with the answer, not the reasoning.
+- When referencing code, use file_path:line_number format.
+- Do not use emojis.
+- Skip filler words and preamble.
+
+# Auto memory
+- You have a persistent memory system at ~/.claude/projects/<project>/memory/.
+- Build it up so future conversations have context about the user's preferences and project.
+- Save user preferences, project facts, feedback on your approach.
+- Organize memory semantically, not chronologically.
+
+# CLAUDE.md
+- CLAUDE.md files contain project instructions. Follow them when present.
+- These instructions OVERRIDE default behavior.`
 
 function cleanContent(content: string): string {
   return content.trim()
@@ -133,6 +166,12 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         content: msg.content,
       }))]
 
+      const systemPrompt = buildSystemPrompt(DEFAULT_TOOLS, BASE_PROMPT, {
+        cwd,
+        platform: process.platform,
+        date: new Date().toISOString().split('T')[0],
+      })
+
       let fullContent = ''
       let thinkingText = ''
       let toolMessages: any[] = []
@@ -140,7 +179,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       const queryLoop = createQueryLoop({
         client: apiRef.current,
         tools: DEFAULT_TOOLS,
-        systemPrompt: BASE_PROMPT,
+        systemPrompt,
         maxTurns: 5,
         initialMessages: conversationHistory,
         openaiTools: OPENAI_TOOLS,

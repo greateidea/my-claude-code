@@ -95,7 +95,19 @@ export function stripThinkingContent(content: string): string {
   return content.replace(THINKING_REGEX, '').trim()
 }
 
-export function buildSystemPrompt(tools: Tool[], basePrompt: string): string {
+export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string }): string {
+  let envSection = ''
+  if (env) {
+    const parts: string[] = []
+    if (env.date) parts.push(`Current date: ${env.date}`)
+    if (env.cwd) parts.push(`Working directory: ${env.cwd}`)
+    if (env.platform) parts.push(`Platform: ${env.platform}`)
+    if (env.gitStatus) parts.push(`Git status:\n${env.gitStatus}`)
+    if (parts.length > 0) {
+      envSection = '\n\n# Environment\n' + parts.join('\n') + '\n'
+    }
+  }
+
   const thinkingInstruction = `
 IMPORTANT: When you need to think through a problem before answering, wrap your reasoning in <thinking> tags:
 
@@ -117,8 +129,8 @@ Then provide your final answer. The thinking will be displayed to help the user 
       .join('\n')
     return `name:${t.name}\ndescription:${t.description}\nParameters:\n${paramsStr}`
   }).join('\n\n')
-  
-  return `${basePrompt}${thinkingInstruction}\n\nTools:\n${toolList}`
+
+  return `${basePrompt}${envSection}${thinkingInstruction}\n\nTools:\n${toolList}`
 }
 
 export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<QueryStep, QueryResult, unknown> {

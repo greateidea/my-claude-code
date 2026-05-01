@@ -2,6 +2,8 @@ import React from 'react'
 import { Box, Text, Spacer } from 'ink'
 import { Messages } from '../messages/Messages'
 import { PromptInput } from '../PromptInput'
+import { SpinnerGlyph } from '../SpinnerGlyph'
+import { ShimmerText } from '../ShimmerText'
 
 function cleanContent(content: string): string {
   return content
@@ -60,7 +62,11 @@ export function REPL({
 
       {thinkingContent && (
         <Box flexDirection="column" marginLeft={2}>
-          <Text color="dim" dimColor>∴ Thinking:</Text>
+          <Box>
+            <SpinnerGlyph color="yellow" interval={120} />
+            <Text> </Text>
+            <Text color="dim" dimColor>Thinking:</Text>
+          </Box>
           {thinkingContent.split('\n').map((line, i) => (
             <Text key={i} color="dim" dimColor>{line}</Text>
           ))}
@@ -69,7 +75,9 @@ export function REPL({
 
       {currentTool && (
         <Box>
-          <Text color="yellow">🔧 Tool: {currentTool}</Text>
+          <SpinnerGlyph color="yellow" interval={120} />
+          <Text> </Text>
+          <Text color="yellow">Tool: {currentTool}</Text>
         </Box>
       )}
 
@@ -79,9 +87,11 @@ export function REPL({
         </Box>
       )}
 
-      {isLoading && (
+      {isLoading && !thinkingContent && !currentTool && (
         <Box>
-          <Text color="yellow">Thinking... </Text>
+          <SpinnerGlyph color="yellow" interval={120} />
+          <Text> </Text>
+          <ShimmerText text="Thinking..." color="yellow" />
         </Box>
       )}
 
