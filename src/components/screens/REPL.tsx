@@ -14,25 +14,31 @@ function cleanContent(content: string): string {
 }
 
 interface REPLProps {
-  messages: Array<{ id: string; type: string; content: string; timestamp: number }>
+  messages: Array<{ id: string; type: string; content: string; thinking?: string; timestamp: number }>
   streamingContent?: string
+  /** In-progress thinking from streaming — cleared when message is saved */
   thinkingContent?: string
   currentTool?: string | null
   isLoading?: boolean
   error?: string | null
   onSendMessage?: (text: string) => void
   ready?: boolean
+  /** Controlled thinking expansion (for keyboard T toggle) */
+  thinkingExpanded?: boolean
+  onToggleThinking?: () => void
 }
 
-export function REPL({ 
-  messages, 
-  streamingContent = '', 
+export function REPL({
+  messages,
+  streamingContent = '',
   thinkingContent = '',
   currentTool = null,
-  isLoading = false, 
-  error, 
-  onSendMessage, 
-  ready = false 
+  isLoading = false,
+  error,
+  onSendMessage,
+  ready = false,
+  thinkingExpanded,
+  onToggleThinking,
 }: REPLProps) {
   const handleSubmit = onSendMessage ?? (() => {})
 
@@ -50,12 +56,14 @@ export function REPL({
 
       <Spacer />
 
-      <Messages messages={messages} />
+      <Messages messages={messages} hidePastThinking thinkingExpanded={thinkingExpanded} />
 
       {thinkingContent && (
-        <Box flexDirection="column">
-          <Text color="dim">💭 Thinking:</Text>
-          <Text color="dim">{thinkingContent}</Text>
+        <Box flexDirection="column" marginLeft={2}>
+          <Text color="dim" dimColor>∴ Thinking:</Text>
+          {thinkingContent.split('\n').map((line, i) => (
+            <Text key={i} color="dim" dimColor>{line}</Text>
+          ))}
         </Box>
       )}
 
@@ -85,7 +93,7 @@ export function REPL({
 
       <Spacer />
 
-      <PromptInput onSubmit={handleSubmit} disabled={isLoading} />
+      <PromptInput onSubmit={handleSubmit} disabled={isLoading} onToggleThinking={onToggleThinking} />
     </Box>
   )
 }

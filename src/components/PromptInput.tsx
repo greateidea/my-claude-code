@@ -4,6 +4,7 @@ import { Box, Text } from 'ink'
 interface PromptInputProps {
   onSubmit: (text: string) => void
   disabled?: boolean
+  onToggleThinking?: () => void
 }
 
 // 不使用动态闪烁，避免 Ink 重新渲染整个树
@@ -11,7 +12,7 @@ function StaticCursor() {
   return <Text bold color="white">▌</Text>
 }
 
-export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
+export function PromptInput({ onSubmit, disabled = false, onToggleThinking }: PromptInputProps) {
   const [input, setInput] = useState('')
   const [isTTY, setIsTTY] = useState(false)
   const inputRef = useRef(input)
@@ -45,6 +46,11 @@ export function PromptInput({ onSubmit, disabled = false }: PromptInputProps) {
           process.exit(0)
         }
         setInput('')
+        return
+      }
+
+      if (char === 'T' && !currentInput.trim()) {
+        onToggleThinking?.()
         return
       }
 

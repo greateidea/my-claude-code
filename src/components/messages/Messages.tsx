@@ -1,5 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import { ThinkingMessage } from '../ThinkingMessage'
 
 function cleanContent(content: string): string {
   return content
@@ -15,14 +16,23 @@ interface Message {
   id: string
   type: string
   content: string
+  thinking?: string
   timestamp: number
 }
 
 interface MessagesProps {
   messages: Message[]
+  /** Only show thinking for the most recent assistant message */
+  hidePastThinking?: boolean
+  /** Controlled thinking expanded state (for keyboard toggle) */
+  thinkingExpanded?: boolean
 }
 
-export function Messages({ messages }: MessagesProps) {
+export function Messages({ messages, hidePastThinking, thinkingExpanded }: MessagesProps) {
+  const lastAssistantId = hidePastThinking
+    ? [...messages].reverse().find(m => m.type === 'assistant')?.id
+    : undefined
+
   return (
     <Box flexDirection="column">
       {messages.length === 0 && (
@@ -31,16 +41,24 @@ export function Messages({ messages }: MessagesProps) {
       {messages.map((m) => {
         let displayContent = m.type === 'assistant' || m.type === 'tool' ? cleanContent(m.content) : m.content
         if (!displayContent) displayContent = m.content // fallback
-        if (!displayContent) return null
+        if (!displayContent && !m.thinking) return null
         const color = m.type === 'user' ? 'green' : m.type === 'tool' ? 'yellow' : 'cyan'
+        // hidePastThinking: only render thinking for the most recent assistant message
+        const showThinking = m.type === 'assistant' && m.thinking && (!hidePastThinking || m.id === lastAssistantId)
         return (
           <Box key={m.id} flexDirection="column">
-            <Box>
-              <Text bold color={color}>
-                {m.type === 'user' ? '> ' : ''}
-              </Text>
-              <Text color={color}>{displayContent}</Text>
-            </Box>
+            {/* Render thinking block above assistant content */}
+            {showThinking && (
+              <ThinkingMessage thinking={m.thinking!} expanded={thinkingExpanded} />
+            )}
+            {displayContent ? (
+              <Box>
+                <Text bold color={color}>
+                  {m.type === 'user' ? '> ' : ''}
+                </Text>
+                <Text color={color}>{displayContent}</Text>
+              </Box>
+            ) : null}
           </Box>
         )
       })}

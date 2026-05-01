@@ -4,6 +4,7 @@ export interface Message {
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool' | 'tool-result'
   content: string
+  thinking?: string
   timestamp: number
 }
 

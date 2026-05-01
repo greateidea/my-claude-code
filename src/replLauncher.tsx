@@ -70,6 +70,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
   const [ready, setReady] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [thinkingContent, setThinkingContent] = useState('')
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const [currentTool, setCurrentTool] = useState<string | null>(null)
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const permissionResolveRef = useRef<((response: PermissionResponse) => void) | null>(null)
@@ -133,8 +134,9 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       }))]
 
       let fullContent = ''
+      let thinkingText = ''
       let toolMessages: any[] = []
-      
+
       const queryLoop = createQueryLoop({
         client: apiRef.current,
         tools: DEFAULT_TOOLS,
@@ -142,6 +144,10 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         maxTurns: 5,
         initialMessages: conversationHistory,
         openaiTools: OPENAI_TOOLS,
+        thinkingConfig: { type: 'enabled' },
+        onThinkingChunk: (reasoning) => {
+          setThinkingContent(prev => prev + reasoning)
+        },
         onMessage: () => {},
         cwd: cwd,
         onPermissionRequest: async (request) => {
@@ -157,7 +163,8 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
       for await (const step of queryLoop) {
         stepCount++
         if (step.type === 'thinking' && step.content) {
-          setThinkingContent(step.content)
+          thinkingText += (thinkingText ? '\n' : '') + step.content
+          setThinkingContent(thinkingText)
         } else if (step.type === 'message' && step.content) {
           fullContent += step.content + '\n'
         } else if (step.type === 'tool') {
@@ -169,21 +176,19 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
               content: `tool called message: [${step.toolUse?.name}: ${step.toolResult}]`,
               timestamp: Date.now()
             })
-            
+
             // 更新完整内容（包含工具调用和结果）
             if (step.toolUse) {
               fullContent += `\n used [Tool: ${step.toolUse.name}, Input: ${JSON.stringify(step.toolUse.input || {})}]\n`
             }
           }
-        } else if (step.type === 'message' && step.content) {
-          fullContent += step.content + '\n'
         } else if (step.type === 'permission') {
           // 权限步骤已被 handlePermissionResponse 处理
         } else if (step.type === 'error') {
           fullContent += `\nError: ${step.content}\n`
         }
       }
-      
+
       setThinkingContent('')
       setCurrentTool(null)
 
@@ -201,11 +206,12 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         return
       }
       
-      const assistantMessage = { 
-        id: Date.now().toString(), 
-        type: 'assistant' as const, 
-        content: cleanContent(finalContent), 
-        timestamp: Date.now() 
+      const assistantMessage = {
+        id: Date.now().toString(),
+        type: 'assistant' as const,
+        content: cleanContent(finalContent),
+        thinking: thinkingText || undefined,
+        timestamp: Date.now()
       }
       
       setState((prev: any) => ({
@@ -244,7 +250,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
           onResponse={(response) => handlePermissionResponse(response.allowed)}
         />
       )}
-      <REPL 
+      <REPL
         messages={messages}
         streamingContent={streamingContent}
         thinkingContent={thinkingContent}
@@ -253,6 +259,8 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         error={error}
         onSendMessage={handleSend}
         ready={ready}
+        thinkingExpanded={thinkingExpanded}
+        onToggleThinking={() => setThinkingExpanded(e => !e)}
       />
     </>
   )

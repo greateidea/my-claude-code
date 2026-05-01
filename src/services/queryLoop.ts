@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { DeepSeekClient, type ChatMessage } from './api/deepseek'
 import { runToolCalls, type ToolCall, partitionToolCalls } from './toolOrchestration'
 import { permissionManager, type PermissionRequest, type PermissionResponse } from './permissions'
+import { type ThinkingConfig, DEFAULT_THINKING_CONFIG } from '../types/thinking'
 
 export interface Tool {
   name: string
@@ -20,6 +21,8 @@ export interface QueryLoopConfig {
   openaiTools?: any[]
   onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
   cwd?: string
+  thinkingConfig?: ThinkingConfig
+  onThinkingChunk?: (reasoning: string) => void
 }
 
 export interface QueryResult {
@@ -121,17 +124,19 @@ Then provide your final answer. The thinking will be displayed to help the user 
 export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<QueryStep, QueryResult, unknown> {
   const toolExecutor = createToolExecutor(config.tools ?? [])
   const messages: ChatMessage[] = []
-  
+
   if (config.systemPrompt) {
     messages.push({ role: 'system', content: config.systemPrompt })
   }
-  
+
   if (config.initialMessages) {
     messages.push(...config.initialMessages)
   }
 
   let turnCount = 0
   const maxTurns = config.maxTurns ?? 10
+  const thinkingConfig = config.thinkingConfig ?? DEFAULT_THINKING_CONFIG
+  const thinkingEnabled = thinkingConfig.type !== 'disabled'
 
   while (turnCount < maxTurns) {
     turnCount++
@@ -144,7 +149,16 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       } else if (config.tools) {
         chatOptions.system = config.systemPrompt || messages[0]?.content
       }
-      
+
+      // Enable streaming when thinking is enabled for real-time reasoning_content
+      if (thinkingEnabled) {
+        chatOptions.stream = true
+        chatOptions.onChunk = (content: string, reasoning: string) => {
+          if (reasoning) config.onThinkingChunk?.(reasoning)
+          if (content) config.onMessage?.(content, false)
+        }
+      }
+
       const response = await config.client.chat(chatOptions)
       
       const apiToolCalls: { name: string; input: Record<string, any>; apiId?: string }[] = (response.toolCalls || []).map((tc: any) => ({
@@ -164,7 +178,8 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       }))
 
       if (allToolCalls.length === 0) {
-        const thinking = extractThinkingContent(rawContent)
+        // Prefer native reasoning_content from API, fall back to XML extraction
+        const thinking = response.reasoning || extractThinkingContent(rawContent)
         if (thinking) {
           yield { type: 'thinking', content: thinking }
           config.onMessage?.(`[thinking] ${thinking}`, false)
@@ -177,7 +192,8 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
         return { reason: 'completed', turnCount }
       }
 
-      const thinking = extractThinkingContent(rawContent)
+      // Prefer native reasoning_content from API, fall back to XML extraction
+      const thinking = response.reasoning || extractThinkingContent(rawContent)
       if (thinking) {
         yield { type: 'thinking', content: thinking }
         config.onMessage?.(`[thinking] ${thinking}`, false)

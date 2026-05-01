@@ -103,7 +103,7 @@
 
 ---
 
-## 当前状态 (2026-04-30)
+## 当前状态 (2026-05-01)
 
 ### 已完成 (Phase 1-10)
 - CLI 框架 + Ink UI + REPL 界面
@@ -119,6 +119,27 @@
 
 ### 当前焦点
 Phase 11: 上下文管理与高级功能
+
+### Thinking 架构对齐 ✅ COMPLETED (2026-05-01)
+
+**基础实现 (2026-04-30):**
+- [x] ThinkingConfig 类型定义 (`src/types/thinking.ts`)
+- [x] Message 类型扩展 `thinking?: string` 字段 (`src/state/AppStateStore.ts`)
+- [x] ThinkingMessage 专用组件 (`src/components/ThinkingMessage.tsx`) — dimmed 样式, 折叠/展开
+- [x] Messages 组件集成 thinking 渲染 (assistant message 上方显示)
+- [x] replLauncher 持久化 thinking 到 Message (历史保留)
+- [x] REPL 流式 thinking 显示对齐 (∴ Thinking: 标签)
+- [x] Claude Code thinking 机制深入学习文档 (`learn/topics/thinking-mechanism.md`)
+
+**流式 + 交互对齐 (2026-05-01):**
+- [x] streamChat() 支持 tool_calls 累积 + reasoning_content 返回 (`src/services/api/deepseek.ts`)
+- [x] queryLoop 启用流式模式, 优先使用原生 `response.reasoning`, XML 回退 (`src/services/queryLoop.ts`)
+- [x] ThinkingConfig 接入组件树: App → queryLoop 完整链路 (`src/replLauncher.tsx`)
+- [x] UI 默认折叠 (`ThinkingMessage` defaultExpanded=false)
+- [x] hidePastThinking — 仅最新 assistant 消息展示 thinking (`Messages.tsx`)
+- [x] 键盘 T 切换 thinking 展开/折叠 (`PromptInput.tsx` + 组件链)
+- [x] 详细实施计划文档 (`thinking_plan.md`)
+- 对齐方式: 流式 `reasoning_content` 为主方案, XML `<thinking>` 提取作为 fallback
 
 ### 待完成
 - CLAUDE.md 项目上下文加载
