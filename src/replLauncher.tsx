@@ -3,8 +3,9 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { AppStateProvider, useSetAppState, useAppState } from './state/AppState'
 import { REPL } from './components/screens/REPL'
 import { DeepSeekClient } from './services/api/deepseek'
-import { createQueryLoop, buildSystemPrompt, type Tool } from './services/queryLoop'
+import { createQueryLoop, buildSystemPrompt, getGitContext, type Tool } from './services/queryLoop'
 import { AVAILABLE_TOOLS } from './tools'
+import { loadClaudeMdFiles, formatClaudeMdPrompt } from './services/claudemd'
 import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
 import type { PermissionRequest, PermissionResponse } from './services/permissions'
 import { permissionManager } from './services/permissions'
@@ -81,7 +82,7 @@ IMPORTANT: Assist with authorized security testing, defensive security, CTF chal
 - Skip filler words and preamble.
 
 # Auto memory
-- You have a persistent memory system at ~/.claude/projects/<project>/memory/.
+- You have a persistent memory system at ~/.myclaude/projects/<project>/memory/.
 - Build it up so future conversations have context about the user's preferences and project.
 - Save user preferences, project facts, feedback on your approach.
 - Organize memory semantically, not chronologically.
@@ -92,6 +93,31 @@ IMPORTANT: Assist with authorized security testing, defensive security, CTF chal
 
 function cleanContent(content: string): string {
   return content.trim()
+}
+
+/**
+ * Build the user context string that gets injected as a synthetic first user message.
+ * Wrapped in <system-reminder> — the model treats this as reference info, not iron law.
+ * This is where CLAUDE.md content goes (following Claude Code's prependUserContext pattern).
+ */
+function buildUserContext(claudeMdText: string | null): string | undefined {
+  const parts: string[] = []
+
+  if (claudeMdText) {
+    parts.push(`# claudeMd\n${claudeMdText}`)
+  }
+
+  parts.push(`# currentDate\nToday's date is ${new Date().toISOString().split('T')[0]}.`)
+
+  const contextBody = parts.join('\n\n')
+
+  return `<system-reminder>
+As you answer the user's questions, you can use the following context:
+${contextBody}
+
+IMPORTANT: this context may or may not be relevant to your tasks.
+You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>`
 }
 
 function App({ initialPrompt }: { initialPrompt?: string }) {
@@ -166,11 +192,21 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         content: msg.content,
       }))]
 
+      // Build system prompt (string[] — static + boundary + dynamic)
+      const gitStatus = await getGitContext(cwd)
       const systemPrompt = buildSystemPrompt(DEFAULT_TOOLS, BASE_PROMPT, {
         cwd,
         platform: process.platform,
         date: new Date().toISOString().split('T')[0],
+        gitStatus: gitStatus ?? undefined,
       })
+
+      // Load CLAUDE.md and build user context
+      // Injected as <system-reminder> so the model treats it as reference info,
+      // not as iron law (which is what system prompt is for).
+      const claudeMdFiles = await loadClaudeMdFiles(cwd)
+      const claudeMdText = formatClaudeMdPrompt(claudeMdFiles)
+      const userContext = buildUserContext(claudeMdText)
 
       let fullContent = ''
       let thinkingText = ''
@@ -180,6 +216,7 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         client: apiRef.current,
         tools: DEFAULT_TOOLS,
         systemPrompt,
+        userContext,
         maxTurns: 5,
         initialMessages: conversationHistory,
         openaiTools: OPENAI_TOOLS,

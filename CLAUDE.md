@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A custom implementation of Claude Code CLI in ~500 LOC, built with Bun + Ink (React for terminal UI) + NVIDIA API. The app is a terminal REPL that chats with an LLM and executes tools (bash, file read/write, glob) via an async generator query loop.
 
+## Conventions
+
+**Namespace isolation**: To avoid conflicts with the real Claude Code, use `myclaude` instead of `.claude` in all paths:
+- `~/.myclaude/` instead of `~/.claude/`
+- `myclaude/CLAUDE.md` instead of `.claude/CLAUDE.md`
+- `~/.myclaude/projects/<project>/memory/` instead of `~/.claude/projects/<project>/memory/`
+
+This applies to all file paths, directory names, and configuration references in source code and prompts.
+
 ## Commands
 
 ```bash

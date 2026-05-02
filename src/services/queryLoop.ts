@@ -3,6 +3,10 @@ import { DeepSeekClient, type ChatMessage } from './api/deepseek'
 import { runToolCalls, type ToolCall, partitionToolCalls } from './toolOrchestration'
 import { permissionManager, type PermissionRequest, type PermissionResponse } from './permissions'
 import { type ThinkingConfig, DEFAULT_THINKING_CONFIG } from '../types/thinking'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export interface Tool {
   name: string
@@ -15,8 +19,10 @@ export interface QueryLoopConfig {
   client: DeepSeekClient
   tools?: Tool[]
   maxTurns?: number
-  systemPrompt?: string
+  systemPrompt?: string | string[]
   initialMessages?: ChatMessage[]
+  /** Injected as a synthetic first user message (wraps CLAUDE.md, date, etc.) */
+  userContext?: string
   onMessage?: (content: string, isToolResult?: boolean) => void
   openaiTools?: any[]
   onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>
@@ -95,30 +101,41 @@ export function stripThinkingContent(content: string): string {
   return content.replace(THINKING_REGEX, '').trim()
 }
 
-export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string }): string {
-  let envSection = ''
-  if (env) {
-    const parts: string[] = []
-    if (env.date) parts.push(`Current date: ${env.date}`)
-    if (env.cwd) parts.push(`Working directory: ${env.cwd}`)
-    if (env.platform) parts.push(`Platform: ${env.platform}`)
-    if (env.gitStatus) parts.push(`Git status:\n${env.gitStatus}`)
-    if (parts.length > 0) {
-      envSection = '\n\n# Environment\n' + parts.join('\n') + '\n'
-    }
-  }
+export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string }): string[] {
+  // ===== Static sections — identical for all users =====
+  const staticSections = [
+    basePrompt,
+    getThinkingSection(),
+    getToolListSection(tools),
+  ]
 
-  const thinkingInstruction = `
-IMPORTANT: When you need to think through a problem before answering, wrap your reasoning in <thinking> tags:
+  // ===== Boundary marker =====
+  // Separates static (cacheable) from dynamic (session-specific) content.
+  // When we later integrate with Anthropic API, this boundary tells splitSysPromptPrefix
+  // where to split for cache_control marking.
+  const boundary = SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+
+  // ===== Dynamic sections — vary per session =====
+  const dynamicSections: string[] = []
+  const envSection = getEnvironmentSection(env)
+  if (envSection) dynamicSections.push(envSection)
+
+  return [...staticSections, boundary, ...dynamicSections]
+}
+
+/** Static: thinking guidance (same for all users) */
+function getThinkingSection(): string {
+  return `IMPORTANT: When you need to think through a problem before answering, wrap your reasoning in <thinking> tags:
 
 <thinking>
 Your step-by-step reasoning goes here...
 </thinking>
 
-Then provide your final answer. The thinking will be displayed to help the user understand your process.
+Then provide your final answer. The thinking will be displayed to help the user understand your process.`
+}
 
-`
-
+/** Static: tool list (derived from tool definitions, same for all users of this build) */
+function getToolListSection(tools: Tool[]): string {
   const toolList = tools.map(t => {
     const params = t.inputSchema
     const paramsStr = Object.entries(params)
@@ -130,15 +147,81 @@ Then provide your final answer. The thinking will be displayed to help the user 
     return `name:${t.name}\ndescription:${t.description}\nParameters:\n${paramsStr}`
   }).join('\n\n')
 
-  return `${basePrompt}${envSection}${thinkingInstruction}\n\nTools:\n${toolList}`
+  return `Tools:\n${toolList}`
 }
+
+/** Dynamic: environment info (varies by user/machine/session) */
+function getEnvironmentSection(env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string }): string | null {
+  if (!env) return null
+  const parts: string[] = []
+  if (env.date) parts.push(`Current date: ${env.date}`)
+  if (env.cwd) parts.push(`Working directory: ${env.cwd}`)
+  if (env.platform) parts.push(`Platform: ${env.platform}`)
+  if (env.gitStatus) parts.push(`Git status:\n${env.gitStatus}`)
+  if (parts.length === 0) return null
+  return '# Environment\n' + parts.join('\n')
+}
+
+const MAX_STATUS_CHARS = 2000
+
+/**
+ * Get git context for the current working directory.
+ * Returns formatted git status + recent commits, or null if not a git repo.
+ * Mirrors Claude Code's getGitStatus() in src/context.ts.
+ */
+export async function getGitContext(cwd: string): Promise<string | null> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd, timeout: 5000 })
+  } catch {
+    return null
+  }
+
+  try {
+    const [branchResult, statusResult, logResult] = await Promise.allSettled([
+      execFileAsync('git', ['branch', '--show-current'], { cwd, timeout: 5000 }),
+      execFileAsync('git', ['status', '--short'], { cwd, timeout: 5000 }),
+      execFileAsync('git', ['log', '--oneline', '-n', '5'], { cwd, timeout: 5000 }),
+    ])
+
+    const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : 'unknown'
+    const statusRaw = statusResult.status === 'fulfilled' ? statusResult.value.stdout : ''
+    const log = logResult.status === 'fulfilled' ? logResult.value.stdout.trim() : ''
+
+    const truncatedStatus = statusRaw.length > MAX_STATUS_CHARS
+      ? statusRaw.substring(0, MAX_STATUS_CHARS) + '\n... (truncated, use bash to see full status)'
+      : statusRaw
+
+    return [
+      `This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.`,
+      `Current branch: ${branch}`,
+      `Status:\n${truncatedStatus || '(clean)'}`,
+      log ? `Recent commits:\n${log}` : '',
+    ].filter(Boolean).join('\n\n')
+  } catch {
+    return null
+  }
+}
+
+/** Static/dynamic boundary marker, same name as Claude Code for future compatibility */
+export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
 
 export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<QueryStep, QueryResult, unknown> {
   const toolExecutor = createToolExecutor(config.tools ?? [])
   const messages: ChatMessage[] = []
 
-  if (config.systemPrompt) {
-    messages.push({ role: 'system', content: config.systemPrompt })
+  // System prompt — join if array, keep as-is if string
+  const systemPromptStr = Array.isArray(config.systemPrompt)
+    ? config.systemPrompt.filter(s => s !== SYSTEM_PROMPT_DYNAMIC_BOUNDARY).join('\n\n')
+    : config.systemPrompt
+
+  if (systemPromptStr) {
+    messages.push({ role: 'system', content: systemPromptStr })
+  }
+
+  // User context — injected as synthetic first user message (like Claude Code's prependUserContext)
+  // CLAUDE.md content goes here so the model treats it as "reference info" not "iron law"
+  if (config.userContext) {
+    messages.push({ role: 'user', content: config.userContext })
   }
 
   if (config.initialMessages) {
@@ -157,9 +240,9 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       const chatOptions: any = { messages, maxTokens: 1500 }
       if (config.openaiTools) {
         chatOptions.tools = config.openaiTools
-        chatOptions.system = config.systemPrompt
+        chatOptions.system = systemPromptStr
       } else if (config.tools) {
-        chatOptions.system = config.systemPrompt || messages[0]?.content
+        chatOptions.system = systemPromptStr || messages[0]?.content
       }
 
       // Enable streaming when thinking is enabled for real-time reasoning_content
