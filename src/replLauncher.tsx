@@ -6,6 +6,7 @@ import { DeepSeekClient } from './services/api/deepseek'
 import { createQueryLoop, buildSystemPrompt, getGitContext, type Tool } from './services/queryLoop'
 import { AVAILABLE_TOOLS } from './tools'
 import { loadClaudeMdFiles, formatClaudeMdPrompt } from './services/claudemd'
+import { loadMemoryPrompt } from './services/memory'
 import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
 import type { PermissionRequest, PermissionResponse } from './services/permissions'
 import { permissionManager } from './services/permissions'
@@ -80,12 +81,6 @@ IMPORTANT: Assist with authorized security testing, defensive security, CTF chal
 - When referencing code, use file_path:line_number format.
 - Do not use emojis.
 - Skip filler words and preamble.
-
-# Auto memory
-- You have a persistent memory system at ~/.myclaude/projects/<project>/memory/.
-- Build it up so future conversations have context about the user's preferences and project.
-- Save user preferences, project facts, feedback on your approach.
-- Organize memory semantically, not chronologically.
 
 # CLAUDE.md
 - CLAUDE.md files contain project instructions. Follow them when present.
@@ -194,11 +189,13 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
 
       // Build system prompt (string[] — static + boundary + dynamic)
       const gitStatus = await getGitContext(cwd)
+      const memoryPrompt = await loadMemoryPrompt(cwd)
       const systemPrompt = buildSystemPrompt(DEFAULT_TOOLS, BASE_PROMPT, {
         cwd,
         platform: process.platform,
         date: new Date().toISOString().split('T')[0],
         gitStatus: gitStatus ?? undefined,
+        memoryPrompt,
       })
 
       // Load CLAUDE.md and build user context
@@ -320,12 +317,6 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
 
   return (
     <>
-      {pendingPermission && (
-        <PermissionConfirm
-          request={pendingPermission}
-          onResponse={(response) => handlePermissionResponse(response.allowed)}
-        />
-      )}
       <REPL
         messages={messages}
         streamingContent={streamingContent}
@@ -338,6 +329,12 @@ function App({ initialPrompt }: { initialPrompt?: string }) {
         thinkingExpanded={thinkingExpanded}
         onToggleThinking={() => setThinkingExpanded(e => !e)}
       />
+      {pendingPermission && (
+        <PermissionConfirm
+          request={pendingPermission}
+          onResponse={(response) => handlePermissionResponse(response.allowed)}
+        />
+      )}
     </>
   )
 }

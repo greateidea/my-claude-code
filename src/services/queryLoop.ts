@@ -101,7 +101,7 @@ export function stripThinkingContent(content: string): string {
   return content.replace(THINKING_REGEX, '').trim()
 }
 
-export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string }): string[] {
+export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd?: string; platform?: string; date?: string; gitStatus?: string; memoryPrompt?: string | null }): string[] {
   // ===== Static sections — identical for all users =====
   const staticSections = [
     basePrompt,
@@ -119,6 +119,8 @@ export function buildSystemPrompt(tools: Tool[], basePrompt: string, env?: { cwd
   const dynamicSections: string[] = []
   const envSection = getEnvironmentSection(env)
   if (envSection) dynamicSections.push(envSection)
+  // Memory system prompt (instructions + existing memories) — follows environment
+  if (env?.memoryPrompt) dynamicSections.push(env.memoryPrompt)
 
   return [...staticSections, boundary, ...dynamicSections]
 }
