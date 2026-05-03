@@ -198,21 +198,10 @@ User Context（注入为第一条 user message）
 | System prompt 静态/动态分离 | ✅ 已完成，有 `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` |
 | CLAUDE.md 加载和注入 | ✅ 已完成，走 `<system-reminder>` 注入 |
 | `<system-reminder>` 通道 | ✅ 已完成，`buildUserContext()` 实现了 |
-| 记忆系统（文件读写） | ❌ 只有 prompt 里的一句话提示，没有实现文件操作 |
+| CLAUDE.md 向上遍历 | ✅ 已完成，从 cwd 向上遍历到 git root |
+| 记忆系统（完整实现） | ✅ 已完成，含类型指南 prompt + MEMORY.md 索引 |
 
-BASE_PROMPT 里这行：
-```
-- You have a persistent memory system at ~/.claude/projects/<project>/memory/.
-```
-只是一个暗示——告诉模型它能保存记忆。但**没有给模型真正的读写能力**，也没有注入 memory 使用指南。如果模型试图保存记忆，它只有 Bash 工具，会闹出各种笑话。
-
-### 如果要补齐记忆系统，需要做什么：
-
-1. **`src/services/memory.ts`** — 读写记忆文件的函数（loadMemoryPrompt、saveMemory、loadMemoryIndex）
-2. **`buildSystemPrompt` 中新增 memory 动态 section** — 注入记忆使用指南 + 当前 MEMORY.md 内容
-3. **给模型文件操作工具** — 让它能写入 `~/.claude/projects/.../memory/` 目录
-
-但这是一个较大的功能，需要先确认记忆系统的设计决策（路径策略、类型系统是否简化、是否需要在工具层控制写入范围）。
+记忆系统已完整实现：`src/services/memory.ts` 中包含 ~150 行的记忆使用指南（4 种类型定义、不保存清单、两步保存流程、检索验证规则），在 `buildSystemPrompt` 中作为动态 section 注入，模型通过现有 Write/Read 工具操作记忆文件。
 
 ---
 

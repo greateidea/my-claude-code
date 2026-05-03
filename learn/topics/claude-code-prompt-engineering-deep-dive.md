@@ -628,8 +628,8 @@ export async function fetchSystemPromptParts(...) {
 |------|------------|-----------|---------|
 | 提示词结构 | 静态/动态分离，缓存标记 | 单一 BASE_PROMPT 字符串 | 我们没有缓存概念，但这对 NVIDIA API 也无效 |
 | 上下文注入 | 三通道：System + User + System Context | buildSystemPrompt 中拼接 env 信息 | 我们把所有信息都放在 system prompt 里，缺少优先级层次 |
-| CLAUDE.md | 完整发现链：Managed→User→Project→Local | 项目根单文件读取 | 缺少向上遍历、@include、条件规则 |
-| 记忆系统 | 类型化记忆 + MEMORY.md 索引 | 简化的 frontmatter 文件系统 | 设计思路一致，但缺少类型系统提示词和索引管理 |
+| CLAUDE.md | 完整发现链：Managed→User→Project→Local | ✅ 向上遍历到 git root，Project + Local 级别 | 缺少 Managed/User 级别、@include、条件规则 |
+| 记忆系统 | 类型化记忆 + MEMORY.md 索引 | ✅ 类型系统提示词 + MEMORY.md 索引管理 | 与 Claude Code 设计一致 |
 | 动态区 | 注册表 + 缓存控制 | 无 | 我们每轮都在 buildSystemPrompt 中重建 |
 | 优先级路由 | 5 级 override→coordinator→agent→custom→default | 无 | 不支持自定义 agent 或系统提示词覆盖 |
 
