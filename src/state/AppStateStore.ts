@@ -6,6 +6,10 @@ export interface Message {
   content: string
   thinking?: string
   timestamp: number
+  /** Native tool_calls from the API — present on assistant messages that triggered tool calls */
+  toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+  /** Native tool_call_id — present on tool messages linking back to the assistant's tool_calls */
+  toolCallId?: string
 }
 
 export interface ToolPermission {

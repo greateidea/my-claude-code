@@ -6,34 +6,112 @@ const MACRO = {
   VERSION: '0.1.0',
 }
 
-function parseArgs(): { command: string; prompt?: string } {
+interface ParsedArgs {
+  command: string
+  prompt?: string
+  continueSession?: boolean
+  resumeSessionId?: string
+  listSessions?: boolean
+}
+
+function parseArgs(): ParsedArgs {
   const args = process.argv.slice(2)
   const realArgs = args.filter(arg => !arg.includes('cli.tsx') && !arg.includes('entrypoints'))
-  
-  if (realArgs.length === 0) return { command: 'chat' }
-  
-  const firstArg = realArgs[0]
-  if (firstArg === 'chat' || firstArg === 'doctor' || firstArg === '--version' || firstArg === '-v') {
-    return { command: firstArg, prompt: realArgs[1] }
+
+  const result: ParsedArgs = { command: 'chat' }
+
+  let i = 0
+  const positional: string[] = []
+
+  while (i < realArgs.length) {
+    const arg = realArgs[i]
+
+    if (arg === '--continue' || arg === '-c') {
+      result.continueSession = true
+      i++
+    } else if (arg === '--resume' || arg === '-r') {
+      result.resumeSessionId = realArgs[i + 1] || ''
+      i += 2
+    } else if (arg === '--list-sessions' || arg === '-ls') {
+      result.listSessions = true
+      i++
+    } else if (arg === 'chat' || arg === 'doctor' || arg === '--version' || arg === '-v' || arg === '--help' || arg === '-h') {
+      result.command = arg
+      i++
+    } else {
+      positional.push(arg)
+      i++
+    }
   }
-  return { command: 'chat', prompt: firstArg }
+
+  if (positional.length > 0) {
+    result.prompt = positional.join(' ')
+  }
+
+  return result
+}
+
+function printHelp(): void {
+  console.log(`My Claude Code ${MACRO.VERSION}
+
+Usage: myclaude [options] [prompt]
+       myclaude [options] chat [prompt]
+
+Options:
+  -c, --continue        Continue the most recent session
+  -r, --resume <id>     Resume a specific session by ID
+  -ls, --list-sessions  List all sessions for the current project
+  -h, --help            Show this help
+  -v, --version         Show version
+
+Examples:
+  myclaude "fix the login bug"     One-shot message
+  myclaude                         Start interactive REPL
+  myclaude --continue              Continue last session
+  myclaude --resume abc123         Resume session abc123
+  myclaude --list-sessions         List all sessions
+`)
 }
 
 async function main(): Promise<void> {
-  const { command, prompt } = parseArgs()
+  const parsed = parseArgs()
 
-  if (command === '--version' || command === '-v') {
+  if (parsed.command === '--version' || parsed.command === '-v') {
     console.log(`${MACRO.VERSION} (My Claude Code)`)
     return
   }
 
-  if (command === 'doctor') {
+  if (parsed.command === '--help' || parsed.command === '-h') {
+    printHelp()
+    return
+  }
+
+  if (parsed.command === 'doctor') {
     console.log('Running doctor...')
     return
   }
 
+  if (parsed.listSessions) {
+    const { listSessions } = await import('../services/persistence')
+    const sessions = await listSessions(process.cwd())
+    if (sessions.length === 0) {
+      console.log('No sessions found for this project.')
+    } else {
+      console.log(`Sessions for ${process.cwd()}:\n`)
+      for (const s of sessions) {
+        const date = new Date(s.lastTimestamp).toLocaleString()
+        console.log(`  ${s.sessionId}  ${date}  ${s.messageCount} messages`)
+      }
+      console.log(`\n${sessions.length} session(s). Use --resume <id> to resume one, or --continue for the latest.`)
+    }
+    return
+  }
+
   const { main: chatMain } = await import('../main')
-  await chatMain(prompt)
+  await chatMain(parsed.prompt, {
+    continueSession: parsed.continueSession,
+    resumeSessionId: parsed.resumeSessionId,
+  })
 }
 
 void main()

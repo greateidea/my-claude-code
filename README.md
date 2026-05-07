@@ -63,19 +63,25 @@ More detail in [`learn/topics/`](learn/topics/).
 ## Commands
 
 ```bash
-bun run dev          # Start interactive REPL
-bun run chat "msg"   # Send one message, get response
-bun test             # Run tests
-bun run typecheck    # Type-check the project
+# Development
+bun run dev                    # Start interactive REPL
+bun run chat "msg"             # Send one message, get response
+bun test                       # Run tests
+bun run typecheck              # Type-check the project
+
+# Session management
+bun run dev -- --continue      # Resume the most recent session
+bun run dev -- --resume <id>   # Resume a specific session by ID
+bun run dev -- --list-sessions  # List all saved sessions
 ```
 
 ## Project Structure
 
 ```
 src/
-├── entrypoints/cli.tsx       # CLI args parsing → routes to main()
-├── main.tsx                  # Calls launchRepl()
-├── replLauncher.tsx          # App + handleSend: assembles prompts, manages streaming
+├── entrypoints/cli.tsx       # CLI args parsing (--continue, --resume, --list-sessions)
+├── main.tsx                  # Calls launchRepl() with options
+├── replLauncher.tsx          # App + handleSend: prompt assembly, streaming, per-turn persistence
 ├── components/
 │   ├── screens/REPL.tsx      # Main layout: messages + prompt + status bar
 │   ├── PromptInput.tsx       # Raw mode stdin handler (useReducer + IME fix)
@@ -87,12 +93,18 @@ src/
 │   ├── queryLoop.ts          # Core: async generator LLM ↔ tool execution loop
 │   ├── toolOrchestration.ts  # Parallel/serial tool execution with semaphore
 │   ├── permissions.ts        # Permission rules, modes, readonly heuristics
+│   ├── persistence.ts        # JSONL conversation storage (append-only, per-session)
+│   ├── sessionManager.ts     # PID-based process registry for live session tracking
+│   ├── paths.ts              # Shared path utilities (~/.myclaude/ namespace)
 │   ├── memory.ts             # Persistent memory system (MEMORY.md index)
 │   └── claudemd.ts           # CLAUDE.md discovery and loading
 ├── tools/index.ts            # Tool definitions: Bash, Read, Write, Glob, Grep, Calculate
-└── state/
-    ├── store.ts              # Minimal external store (Zustand-like)
-    └── AppState.tsx          # React context + subscription hooks
+├── state/
+│   ├── store.ts              # Minimal external store (Zustand-like)
+│   ├── AppStateStore.ts      # AppState + Message types
+│   └── AppState.tsx          # React context + subscription hooks
+├── bootstrap/state.ts        # Session initialization (UUID, resume, project root)
+└── types/session.ts          # SessionKind type
 
 tests/                        # Standalone test scripts (no mocking)
 learn/topics/                 # Deep-dive learning documents
@@ -100,6 +112,10 @@ learn/topics/                 # Deep-dive learning documents
 
 ## Features
 
+- **Session persistence** — conversations saved as append-only JSONL in `~/.myclaude/projects/<hash>/<sessionId>.jsonl`
+- **Session resume** — `--continue` restores the most recent session, `--resume <id>` picks a specific one
+- **PID process registry** — `~/.myclaude/sessions/<pid>.json` tracks live sessions, orphans auto-cleaned
+- **Tool calls round-trip** — `tool_calls` and `tool_call_id` preserved in JSONL so resumed sessions feed the LLM correctly
 - **Streaming reasoning** — `reasoning_content` from Qwen3 models displayed in real-time
 - **Multi-turn tool loop** — LLM calls tools, sees results, calls more tools, up to 5 turns
 - **Permission system** — auto-allow readonly tools, ask for destructive ones, remember choices per session

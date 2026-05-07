@@ -1,17 +1,11 @@
-import { homedir } from 'os'
 import { join } from 'path'
 import { mkdir, readFile } from 'fs/promises'
+import { getProjectDir, sanitizeProjectPath } from './paths.js'
 
-/**
- * Sanitize a project path for use as a directory name.
- * Replaces / with - so "/Users/name/my-project" becomes "-Users-name-my-project".
- */
-export function sanitizeProjectPath(cwd: string): string {
-  return cwd.replace(/\//g, '-')
-}
+export { sanitizeProjectPath }
 
 export function getMemoryDir(cwd: string): string {
-  return join(homedir(), '.myclaude', 'projects', sanitizeProjectPath(cwd), 'memory')
+  return join(getProjectDir(cwd), 'memory')
 }
 
 async function ensureMemoryDir(cwd: string): Promise<string> {

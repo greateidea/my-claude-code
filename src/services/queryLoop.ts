@@ -42,6 +42,10 @@ export interface QueryStep {
   content?: string
   toolUse?: { name: string; input: Record<string, string> }
   toolResult?: string
+  /** Native API tool_call_id — set on tool steps so the caller can persist it */
+  toolCallId?: string
+  /** Native tool_calls from the API response — set on message steps that precede tool calls */
+  toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   permissionRequest?: PermissionRequest
   permissionResponse?: PermissionResponse
 }
@@ -283,7 +287,7 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
         }
         const content = stripThinkingContent(rawContent)
         config.onMessage?.(content, false)
-        yield { type: 'message', content }
+        yield { type: 'message', content, toolCalls: undefined }
         if (content) messages.push({ role: 'assistant', content })
         else if (thinking) messages.push({ role: 'assistant', content: rawContent })
         return { reason: 'completed', turnCount }
@@ -297,7 +301,13 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       }
       const content = stripThinkingContent(rawContent)
       config.onMessage?.(content, false)
-      yield { type: 'message', content }
+      // Yield toolCalls so the caller can persist them on the assistant entry
+      const nativeToolCalls = response.toolCalls?.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: { name: tc.name, arguments: tc.arguments },
+      }))
+      yield { type: 'message', content, toolCalls: nativeToolCalls }
 
       // Store assistant message — WITH tool_calls for native API calls so the model
       // recognizes its own tool calls. Without this, the model sees orphaned tool results
@@ -345,7 +355,7 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
           // 工具开始执行，记录但不 yield 结果
           config.onMessage?.(`[tool] ${step.toolCall?.name}`, true)
         } else if (step.type === 'result') {
-          yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any }, toolResult: step.result! }
+          yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any }, toolResult: step.result!, toolCallId: step.toolCall?.apiId }
           const apiId = step.toolCall?.apiId
           if (apiId) {
             // Native tool call — use proper tool role with tool_call_id
