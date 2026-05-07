@@ -12,6 +12,7 @@ interface ParsedArgs {
   continueSession?: boolean
   resumeSessionId?: string
   listSessions?: boolean
+  clearSessions?: boolean
 }
 
 function parseArgs(): ParsedArgs {
@@ -34,6 +35,9 @@ function parseArgs(): ParsedArgs {
       i += 2
     } else if (arg === '--list-sessions' || arg === '-ls') {
       result.listSessions = true
+      i++
+    } else if (arg === '--clear-sessions' || arg === '--clear') {
+      result.clearSessions = true
       i++
     } else if (arg === 'chat' || arg === 'doctor' || arg === '--version' || arg === '-v' || arg === '--help' || arg === '-h') {
       result.command = arg
@@ -61,6 +65,7 @@ Options:
   -c, --continue        Continue the most recent session
   -r, --resume <id>     Resume a specific session by ID
   -ls, --list-sessions  List all sessions for the current project
+  --clear, --clear-sessions  Clear all session records for the current project
   -h, --help            Show this help
   -v, --version         Show version
 
@@ -88,6 +93,43 @@ async function main(): Promise<void> {
 
   if (parsed.command === 'doctor') {
     console.log('Running doctor...')
+    return
+  }
+
+  if (parsed.clearSessions) {
+    const { rm, readdir } = await import('fs/promises')
+    const { join } = await import('path')
+    const { getProjectDir, getSessionsDir } = await import('../services/paths')
+
+    const projectDir = getProjectDir(process.cwd())
+    const sessionsDir = getSessionsDir()
+
+    let deletedCount = 0
+
+    // Clear all JSONL session files in the project directory
+    try {
+      const files = await readdir(projectDir)
+      for (const file of files) {
+        if (file.endsWith('.jsonl')) {
+          await rm(join(projectDir, file))
+          deletedCount++
+        }
+      }
+    } catch {
+      // Directory doesn't exist — that's fine
+    }
+
+    // Clear PID registry files
+    try {
+      const pidFiles = await readdir(sessionsDir)
+      for (const file of pidFiles) {
+        await rm(join(sessionsDir, file))
+      }
+    } catch {
+      // Directory doesn't exist — that's fine
+    }
+
+    console.log(`Cleared ${deletedCount} session record(s) and PID files.`)
     return
   }
 
