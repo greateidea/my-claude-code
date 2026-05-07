@@ -46,6 +46,8 @@ export interface QueryStep {
   toolCallId?: string
   /** Native tool_calls from the API response — set on message steps that precede tool calls */
   toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+  /** Native reasoning_content from the API — set on message steps so it can be passed back */
+  reasoningContent?: string
   permissionRequest?: PermissionRequest
   permissionResponse?: PermissionResponse
 }
@@ -287,9 +289,9 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
         }
         const content = stripThinkingContent(rawContent)
         config.onMessage?.(content, false)
-        yield { type: 'message', content, toolCalls: undefined }
-        if (content) messages.push({ role: 'assistant', content })
-        else if (thinking) messages.push({ role: 'assistant', content: rawContent })
+        yield { type: 'message', content, toolCalls: undefined, reasoningContent: response.reasoning }
+        if (content) messages.push({ role: 'assistant', content, reasoning_content: response.reasoning })
+        else if (thinking) messages.push({ role: 'assistant', content: rawContent, reasoning_content: response.reasoning })
         return { reason: 'completed', turnCount }
       }
 
@@ -307,7 +309,7 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
         type: 'function' as const,
         function: { name: tc.name, arguments: tc.arguments },
       }))
-      yield { type: 'message', content, toolCalls: nativeToolCalls }
+      yield { type: 'message', content, toolCalls: nativeToolCalls, reasoningContent: response.reasoning }
 
       // Store assistant message — WITH tool_calls for native API calls so the model
       // recognizes its own tool calls. Without this, the model sees orphaned tool results
@@ -321,11 +323,12 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
             type: 'function' as const,
             function: { name: tc.name, arguments: tc.arguments },
           })),
+          reasoning_content: response.reasoning,
         })
       } else if (content) {
-        messages.push({ role: 'assistant', content })
+        messages.push({ role: 'assistant', content, reasoning_content: response.reasoning })
       } else if (thinking) {
-        messages.push({ role: 'assistant', content: rawContent })
+        messages.push({ role: 'assistant', content: rawContent, reasoning_content: response.reasoning })
       }
 
       // 委托给 toolOrchestration 处理并行/串行执行

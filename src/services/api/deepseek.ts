@@ -10,6 +10,8 @@ export interface ChatMessage {
     type: 'function'
     function: { name: string; arguments: string }
   }>
+  /** Thinking-mode models require reasoning_content to be passed back in subsequent turns. */
+  reasoning_content?: string
 }
 
 export interface ChatOptions {
@@ -33,7 +35,9 @@ export interface ChatResponse {
   }
 }
 
-const DEFAULT_MODEL = 'qwen/qwen3-next-80b-a3b-thinking'
+// const DEFAULT_MODEL = 'deepseek-v4-flash'
+// const DEFAULT_BASE_URL = 'https://api.deepseek.com'
+const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b'
 const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com/v1'
 
 export interface StreamOptions {

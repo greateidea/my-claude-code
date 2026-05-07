@@ -16,6 +16,8 @@ export interface TranscriptEntry {
     tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>
     /** tool_call_id linking a tool_result back to the assistant's tool_calls entry */
     tool_call_id?: string
+    /** reasoning_content from thinking-mode models — must be passed back in subsequent turns */
+    reasoning_content?: string
   }
   uuid: string
   parentUuid: string | null

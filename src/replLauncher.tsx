@@ -1,4 +1,3 @@
-import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { AppStateProvider, useSetAppState, useAppState } from './state/AppState'
@@ -22,6 +21,19 @@ import {
 import { registerSession, unregisterSessionSync } from './services/sessionManager'
 
 function toolToOpenAI(tool: Tool): any {
+  const properties: Record<string, any> = {}
+  const required: string[] = []
+
+  for (const [key, zodType] of Object.entries(tool.inputSchema)) {
+    // Zod 4 built-in JSON Schema conversion
+    const zt = zodType as any
+    properties[key] = zt.toJSONSchema()
+    // Only include in required if the field is NOT optional
+    if (!zt.isOptional()) {
+      required.push(key)
+    }
+  }
+
   return {
     type: 'function',
     function: {
@@ -29,29 +41,14 @@ function toolToOpenAI(tool: Tool): any {
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: tool.inputSchema,
-        required: Object.keys(tool.inputSchema),
+        properties,
+        required,
       },
     },
   }
 }
 
-const DEFAULT_TOOLS: Tool[] = [
-  {
-    name: 'calculate',
-    description: 'Evaluate math expressions',
-    inputSchema: { expression: z.string() },
-    execute: async ({ expression }: any) => {
-      try {
-        const result = Function(`"use strict"; return (${expression})`)()
-        return String(result)
-      } catch (e: any) {
-        return `Error: ${e.message}`
-      }
-    },
-  },
-  ...AVAILABLE_TOOLS,
-]
+const DEFAULT_TOOLS: Tool[] = [...AVAILABLE_TOOLS]
 
 // 转换为官方 API 格式
 const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
@@ -59,6 +56,7 @@ const OPENAI_TOOLS = DEFAULT_TOOLS.map(toolToOpenAI)
 const BASE_PROMPT = `You are an interactive CLI agent helping with software engineering tasks. Use the instructions below and the tools available to you.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive purposes.
+IMPORTANT: Always provide a visible text response, even if very short. Your reasoning/thinking is displayed separately — do not put your entire answer inside the thinking block. At minimum, restate your conclusion or answer in the main content.
 
 # Doing tasks
 - The user will request software engineering tasks: solving bugs, adding features, refactoring, explaining code, etc.
@@ -139,6 +137,9 @@ function messagesToChatHistory(messages: any[]): Array<{ role: 'user' | 'assista
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           entry.tool_calls = msg.toolCalls
         }
+        if (msg.reasoningContent) {
+          entry.reasoning_content = msg.reasoningContent
+        }
         result.push(entry)
         break
       }
@@ -170,6 +171,10 @@ function transcriptEntryToMessage(entry: TranscriptEntry): any {
       // Restore tool_calls so the query loop can reconstruct proper assistant messages
       if (entry.message.tool_calls && entry.message.tool_calls.length > 0) {
         msg.toolCalls = entry.message.tool_calls
+      }
+      // Restore reasoning_content so thinking-mode models get it back
+      if (entry.message.reasoning_content) {
+        msg.reasoningContent = entry.message.reasoning_content
       }
       return msg
     }
@@ -326,19 +331,31 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         if (step.type === 'thinking' && step.content) {
           thinkingText += (thinkingText ? '\n' : '') + step.content
           setThinkingContent(thinkingText)
-        } else if (step.type === 'message' && step.content) {
-          // Per-turn assistant message — persist immediately with tool_calls if present
+        } else if (step.type === 'message') {
+          // Per-turn assistant message — persist immediately.
+          // Don't skip empty content: the model may output only thinking
+          // (reasoning_content) with no text, and thinking needs somewhere to attach.
+          // Similarly, tool_calls may be present even if the text content is empty.
+          const hasContent = step.content && step.content.trim()
+          const hasToolCalls = step.toolCalls && step.toolCalls.length > 0
+          if (!hasContent && !hasToolCalls && !thinkingText) {
+            continue // truly empty — nothing to show or persist
+          }
+
           const assistantMsgId = randomUUID()
           const assistantTimestamp = new Date().toISOString()
 
           const assistantMsg: any = {
             id: assistantMsgId,
             type: 'assistant' as const,
-            content: cleanContent(step.content),
+            content: cleanContent(step.content || ''),
             timestamp: Date.now(),
           }
-          if (step.toolCalls && step.toolCalls.length > 0) {
+          if (hasToolCalls) {
             assistantMsg.toolCalls = step.toolCalls
+          }
+          if (step.reasoningContent) {
+            assistantMsg.reasoningContent = step.reasoningContent
           }
 
           newAppMessages.push(assistantMsg)
@@ -347,8 +364,9 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             type: 'assistant',
             message: {
               role: 'assistant',
-              content: step.content,
+              content: step.content || '',
               tool_calls: step.toolCalls,
+              reasoning_content: step.reasoningContent,
             },
             uuid: assistantMsgId,
             parentUuid: null,

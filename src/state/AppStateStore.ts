@@ -10,6 +10,8 @@ export interface Message {
   toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   /** Native tool_call_id — present on tool messages linking back to the assistant's tool_calls */
   toolCallId?: string
+  /** Native reasoning_content — must be passed back to the API in subsequent turns */
+  reasoningContent?: string
 }
 
 export interface ToolPermission {
