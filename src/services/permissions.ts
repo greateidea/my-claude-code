@@ -35,7 +35,7 @@ interface PermissionRuleSet {
 const DEFAULT_RULES: PermissionRuleSet = {
   allow: [],
   deny: [],
-  ask: ['Bash', 'Write', 'Edit', 'WebFetch'],
+  ask: ['Bash', 'Write', 'Edit', 'WebFetch', 'EnterPlanMode'],
 }
 
 const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep'])
@@ -175,7 +175,15 @@ export class PermissionManager {
     }
 
     if (this.mode === 'plan') {
-      if (toolName === 'Bash' || toolName === 'Write' || toolName === 'Edit') {
+      // In plan mode, allow Write/Edit ONLY for the plan file
+      if (toolName === 'Write' || toolName === 'Edit') {
+        const filePath = toolInput.file_path || toolInput.filePath || ''
+        if (filePath && filePath.includes('/.myclaude/plans/')) {
+          return { decision: 'allow', rule: 'Plan file', source: 'session' }
+        }
+        return { decision: 'deny', rule: 'Plan mode — only plan file can be modified', source: 'deny' }
+      }
+      if (toolName === 'Bash') {
         return { decision: 'deny', rule: 'Plan mode', source: 'deny' }
       }
     }

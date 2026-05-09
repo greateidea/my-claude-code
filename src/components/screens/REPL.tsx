@@ -28,6 +28,8 @@ interface REPLProps {
   /** Controlled thinking expansion (for keyboard T toggle) */
   thinkingExpanded?: boolean
   onToggleThinking?: () => void
+  /** Current permission mode — shown in UI */
+  permissionMode?: string
 }
 
 export function REPL({
@@ -41,6 +43,7 @@ export function REPL({
   ready = false,
   thinkingExpanded,
   onToggleThinking,
+  permissionMode,
 }: REPLProps) {
   const handleSubmit = onSendMessage ?? (() => {})
 
@@ -53,6 +56,9 @@ export function REPL({
           <Text color="green"> [OK]</Text>
         ) : (
           <Text color="red"> [NO API]</Text>
+        )}
+        {permissionMode === 'plan' && (
+          <Text color="yellow"> [PLAN MODE]</Text>
         )}
       </Box>
 

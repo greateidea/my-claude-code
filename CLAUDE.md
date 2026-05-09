@@ -67,7 +67,7 @@ src/
 
 **Permissions**: `PermissionManager` classifies tools as readonly (auto-allow), checks against allow/deny/ask rules, supports modes (`default`, `acceptEdits`, `plan`, `dontAsk`), and bash heuristic (known readonly commands auto-allowed).
 
-**API client** (`services/api/deepseek.ts`): Wraps OpenAI SDK pointing at `https://integrate.api.nvidia.com/v1`. Default model: `qwen/qwen3-next-80b-a3b-thinking`. Supports streaming with reasoning content extraction.
+**API client** (`services/api/deepseek.ts`): Wraps OpenAI SDK pointing at `https://integrate.api.nvidia.com/v1`. Default model: `nvidia/nemotron-3-super-120b-a12b`. Supports streaming with reasoning content extraction.
 
 ## Environment
 

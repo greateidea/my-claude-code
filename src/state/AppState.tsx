@@ -41,6 +41,7 @@ export function AppStateProvider({
         cwd: process.cwd(),
         model: 'claude-3-5-sonnet-20241022',
         toolPermissions: [],
+        permissionMode: 'default',
         showSidebar: false,
         selectedMessageId: null,
       },

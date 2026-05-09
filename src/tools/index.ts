@@ -372,7 +372,127 @@ export const CalculateTool: Tool = {
   ...readOnlyTool(),
 }
 
-export const AVAILABLE_TOOLS = [CalculateTool, BashTool, FileReadTool, EditTool, FileWriteTool, GlobTool, GrepTool]
+// ========== Plan Mode Tools ==========
+
+// These are placed after the main tool array because they reference plan utilities
+// that import from our own services (lazy-loaded in execute to avoid circular deps).
+
+export const EnterPlanModeTool: Tool = {
+  name: 'EnterPlanMode',
+  description: `Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment.
+
+## When to Use This Tool
+
+**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:
+
+1. **New Feature Implementation**: Adding meaningful new functionality
+2. **Multiple Valid Approaches**: The task can be solved in several different ways
+3. **Code Modifications**: Changes that affect existing behavior or structure
+4. **Architectural Decisions**: The task requires choosing between patterns or technologies
+5. **Multi-File Changes**: The task will likely touch more than 2-3 files
+6. **Unclear Requirements**: You need to explore before understanding the full scope
+7. **User Preferences Matter**: The implementation could reasonably go multiple ways
+
+## When NOT to Use This Tool
+
+Only skip EnterPlanMode for simple tasks:
+- Single-line or few-line fixes (typos, obvious bugs, small tweaks)
+- Adding a single function with clear requirements
+- Pure research/exploration tasks
+
+## What Happens in Plan Mode
+
+In plan mode, you can only read/search files and write to the plan file. You cannot modify code or run Bash commands. Explore the codebase, design an approach, write the plan, then call ExitPlanMode for user approval.`,
+  inputSchema: {},
+  execute: async () => {
+    const { permissionManager } = await import('../services/permissions')
+    const { createPlanFile } = await import('../services/plans')
+
+    if (permissionManager.getMode() === 'plan') {
+      return 'Already in plan mode.'
+    }
+
+    // Save current mode for restoration on exit
+    const prePlanMode = permissionManager.getMode()
+    ;(permissionManager as any)._prePlanMode = prePlanMode
+
+    permissionManager.setMode('plan')
+    const planPath = createPlanFile()
+
+    return `Entered plan mode. Plan file: ${planPath}
+
+Plan mode is now active. You are in a read-only research phase:
+1. Explore the codebase using Read/Glob/Grep tools
+2. Design your implementation approach
+3. Write your plan to the plan file using the Write tool (this is the ONLY file you may modify)
+4. When your plan is complete, call ExitPlanMode to present it for user approval
+
+Do NOT make any edits outside the plan file. Do NOT run Bash commands.`
+  },
+  isConcurrencySafe: () => false,
+}
+
+export const ExitPlanModeTool: Tool = {
+  name: 'ExitPlanMode',
+  description: `Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
+
+## How This Tool Works
+- You should have already written your plan to the plan file specified when you entered plan mode
+- This tool does NOT take the plan content as a parameter - it will read the plan from the file you wrote
+- This tool simply signals that you're done planning and ready for the user to review and approve
+- The user will see the contents of your plan file when they review it
+
+## When to Use This Tool
+IMPORTANT: Only use this tool when the task requires planning the implementation steps of a task that requires writing code. For research tasks where you're gathering information, searching files, reading files or in general trying to understand the codebase - do NOT use this tool.
+
+## Before Using This Tool
+Ensure your plan is complete and unambiguous. Once your plan is finalized, use THIS tool to request approval.
+
+## Examples
+1. Initial task: "Search for and understand the implementation of vim mode in the codebase" - Do not use the exit plan mode tool because you are not planning the implementation steps of a task.
+2. Initial task: "Help me implement yank mode for vim" - Use the exit plan mode tool after you have finished planning the implementation steps of the task.`,
+  inputSchema: {},
+  execute: async () => {
+    const { permissionManager } = await import('../services/permissions')
+    const { getPlan, getPlanApprovalHandler } = await import('../services/plans')
+
+    if (permissionManager.getMode() !== 'plan') {
+      return 'You are not in plan mode. This tool is only for exiting plan mode after writing a plan.'
+    }
+
+    const plan = getPlan()
+    if (!plan || plan.trim() === '' || plan.trim() === '# Plan\n\n') {
+      return 'No plan found. Please write your plan to the plan file before calling ExitPlanMode.'
+    }
+
+    // Request user approval
+    const handler = getPlanApprovalHandler()
+    if (!handler) {
+      // No handler registered — exit plan mode directly
+      permissionManager.setMode((permissionManager as any)._prePlanMode || 'default')
+      return 'Exited plan mode (no approval handler registered).'
+    }
+
+    const result = await handler(plan)
+
+    if (result.approved) {
+      // Restore pre-plan mode
+      const prePlanMode = (permissionManager as any)._prePlanMode || 'default'
+      permissionManager.setMode(prePlanMode)
+      delete (permissionManager as any)._prePlanMode
+
+      const feedbackNote = result.feedback ? `\n\nUser feedback: ${result.feedback}` : ''
+      return `User has approved your plan. You can now start coding.${feedbackNote}\n\n## Approved Plan:\n${plan}`
+    } else {
+      // User rejected — stay in plan mode
+      const feedbackNote = result.feedback ? `\n\nUser feedback: ${result.feedback}` : ''
+      return `User wants you to revise the plan.${feedbackNote}\n\nPlease update the plan file and call ExitPlanMode again when ready.`
+    }
+  },
+  isConcurrencySafe: () => false,
+}
+
+export const AVAILABLE_TOOLS = [CalculateTool, BashTool, FileReadTool, EditTool, FileWriteTool, GlobTool, GrepTool, EnterPlanModeTool, ExitPlanModeTool]
 
 export function findToolByName(tools: Tool[], name: string): Tool | undefined {
   return tools.find(t => t.name === name)

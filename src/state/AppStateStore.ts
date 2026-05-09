@@ -1,4 +1,5 @@
 import type { Store } from './store.js'
+import type { PermissionMode } from '../services/permissions.js'
 
 export interface Message {
   id: string
@@ -25,15 +26,17 @@ export interface AppState {
   inputText: string
   isLoading: boolean
   error: string | null
-  
+
   // Session info
   sessionId: string
   cwd: string
   model: string
-  
+
   // Permissions
   toolPermissions: ToolPermission[]
-  
+  /** Current permission mode — tracked so UI can show plan mode indicator */
+  permissionMode: PermissionMode
+
   // UI state
   showSidebar: boolean
   selectedMessageId: string | null
@@ -44,13 +47,14 @@ export const DEFAULT_APP_STATE: AppState = {
   inputText: '',
   isLoading: false,
   error: null,
-  
+
   sessionId: '',
   cwd: process.cwd(),
   model: 'claude-3-5-sonnet-20241022',
-  
+
   toolPermissions: [],
-  
+  permissionMode: 'default',
+
   showSidebar: false,
   selectedMessageId: null,
 }

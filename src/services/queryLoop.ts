@@ -29,6 +29,8 @@ export interface QueryLoopConfig {
   cwd?: string
   thinkingConfig?: ThinkingConfig
   onThinkingChunk?: (reasoning: string) => void
+  /** Whether plan mode is active — injects plan mode attachment into the prompt */
+  planMode?: boolean
 }
 
 export interface QueryResult {
@@ -213,6 +215,32 @@ export async function getGitContext(cwd: string): Promise<string | null> {
 /** Static/dynamic boundary marker, same name as Claude Code for future compatibility */
 export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
 
+/** Full plan mode instructions — shown on turn 1 and every 5th turn. */
+const PLAN_MODE_ATTACHMENT = `Plan mode is active. You are in a READ-ONLY research phase. You CANNOT modify any project files or run Bash commands.
+
+## What you CAN do:
+- Read files (Read tool)
+- Search code (Glob tool for file names, Grep tool for file content)
+- Write to the plan file (Write/Edit tools, ONLY for ~/.myclaude/plans/*.md)
+
+## What you MUST do:
+1. **Explore** the codebase to understand the current architecture
+2. **Design** your implementation approach
+3. **Write** your plan to the plan file (this is the ONLY file you may modify)
+4. **Call ExitPlanMode** when your plan is ready for user review
+
+## Important:
+- Do NOT make any edits to project files — you will be blocked
+- Do NOT run any Bash commands — you will be blocked
+- Once you call ExitPlanMode, the user will review your plan and approve or request changes
+- After approval, plan mode will be lifted and you can implement your plan`
+
+/** Short plan mode reminder — shown on intermediate turns to save tokens. */
+const PLAN_MODE_ATTACHMENT_SHORT = `Plan mode still active. Read-only except for the plan file (~/.myclaude/plans/*.md). Call ExitPlanMode when your plan is ready.`
+
+/** How often to show the full attachment vs the short reminder (every N turns). */
+const PLAN_MODE_FULL_ATTACHMENT_INTERVAL = 5
+
 export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<QueryStep, QueryResult, unknown> {
   const toolExecutor = createToolExecutor(config.tools ?? [])
   const messages: ChatMessage[] = []
@@ -244,8 +272,24 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
   while (turnCount < maxTurns) {
     turnCount++
 
+    // Per-turn plan mode attachment — injected every turn so the model
+    // doesn't "forget" it's in plan mode. Full instructions every N turns,
+    // short reminder on intermediate turns (saves tokens).
+    const turnMessages = config.planMode
+      ? [
+          {
+            role: 'system' as const,
+            content:
+              turnCount % PLAN_MODE_FULL_ATTACHMENT_INTERVAL === 1
+                ? PLAN_MODE_ATTACHMENT
+                : PLAN_MODE_ATTACHMENT_SHORT,
+          },
+          ...messages,
+        ]
+      : messages
+
     try {
-      const chatOptions: any = { messages, maxTokens: 1500 }
+      const chatOptions: any = { messages: turnMessages, maxTokens: 1500 }
       if (config.openaiTools) {
         chatOptions.tools = config.openaiTools
         chatOptions.system = systemPromptStr

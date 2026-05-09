@@ -267,7 +267,9 @@ export async function* executeToolsConcurrently(
     if (running.length === 0) break
 
     const done = await Promise.race(running.map(r => r.promise))
-    const doneIndex = running.findIndex(r => r.promise === Promise.resolve(done))
+    // Match by unique id — Promise.resolve(done) creates a new promise
+    // that never equals r.promise, causing an infinite loop.
+    const doneIndex = running.findIndex(r => r.call.id === done.toolCall?.id)
     if (doneIndex >= 0) running.splice(doneIndex, 1)
 
     yield { type: 'tool', toolCall: done.toolCall }

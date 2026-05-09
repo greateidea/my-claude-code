@@ -8,6 +8,7 @@ import { AVAILABLE_TOOLS } from './tools'
 import { loadClaudeMdFiles, formatClaudeMdPrompt } from './services/claudemd'
 import { loadMemoryPrompt } from './services/memory'
 import { PermissionConfirm, createPermissionRequest } from './components/PermissionConfirm'
+import { PlanApprovalDialog } from './components/PlanApprovalDialog'
 import type { PermissionRequest, PermissionResponse } from './services/permissions'
 import { permissionManager } from './services/permissions'
 import { initializeSession, getSessionId, getOriginalCwd, switchSession } from './bootstrap/state'
@@ -19,6 +20,11 @@ import {
   type TranscriptEntry,
 } from './services/persistence'
 import { registerSession, unregisterSessionSync } from './services/sessionManager'
+import {
+  setPlanApprovalHandler,
+  createPlanFile,
+  getCurrentPlanPath,
+} from './services/plans'
 
 function toolToOpenAI(tool: Tool): any {
   const properties: Record<string, any> = {}
@@ -207,6 +213,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
   const setState = useSetAppState()
   const messages = useAppState(s => s.messages)
   const cwd = useAppState(s => s.cwd)
+  const permissionMode = useAppState(s => s.permissionMode)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
@@ -221,6 +228,26 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(sessionId)
   const initialized = useRef(false)
+
+  // Plan mode state
+  const [planApprovalPending, setPlanApprovalPending] = useState<{
+    plan: string
+    approve: (feedback?: string) => void
+    reject: (feedback: string) => void
+  } | null>(null)
+
+  // Register plan approval handler so ExitPlanMode tool can trigger the dialog
+  useEffect(() => {
+    setPlanApprovalHandler((plan) =>
+      new Promise((resolve) => {
+        setPlanApprovalPending({
+          plan,
+          approve: (feedback) => resolve({ approved: true, feedback }),
+          reject: (feedback) => resolve({ approved: false, feedback }),
+        })
+      })
+    )
+  }, [])
 
   // Sync refs
   useEffect(() => {
@@ -251,6 +278,71 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
 
   const handleSend = useCallback(async (text: string) => {
     if (!apiRef.current || loading) return
+
+    // Detect /plan command — user manually enters plan mode
+    if (text.startsWith('/plan')) {
+      const description = text.slice(5).trim()
+
+      if (permissionManager.getMode() === 'plan') {
+        // Already in plan mode — just send the description
+        if (description) {
+          // continue below with text = description
+          text = description
+        } else {
+          // /plan with no args while in plan mode — show status
+          const planPath = getCurrentPlanPath()
+          setState((prev: any) => ({
+            ...prev,
+            messages: [...prev.messages, {
+              id: randomUUID(),
+              type: 'system' as const,
+              content: `Already in plan mode.\nPlan file: ${planPath || '(unknown)'}\nWrite your plan to the plan file, then call ExitPlanMode.`,
+              timestamp: Date.now(),
+            }],
+          }))
+          return
+        }
+      } else {
+        // Enter plan mode
+        const prePlanMode = permissionManager.getMode()
+        ;(permissionManager as any)._prePlanMode = prePlanMode
+        permissionManager.setMode('plan')
+        const planPath = createPlanFile()
+        setState((prev: any) => ({
+          ...prev,
+          permissionMode: 'plan',
+        }))
+
+        if (description) {
+          // /plan <description> — enter plan mode AND send description to LLM
+          const planMsg = {
+            id: randomUUID(),
+            type: 'system' as const,
+            content: `Plan mode activated. Plan file: ${planPath}\nExplore the codebase, design your approach, write the plan to the plan file, then call ExitPlanMode.`,
+            timestamp: Date.now(),
+          }
+          setState((prev: any) => ({
+            ...prev,
+            messages: [...prev.messages, planMsg],
+          }))
+          text = description
+          // fall through to normal send below
+        } else {
+          // /plan with no args — just enter plan mode, don't send to LLM
+          const planMsg = {
+            id: randomUUID(),
+            type: 'system' as const,
+            content: `Plan mode activated. Plan file: ${planPath}\n\nYou are now in plan mode. All edits are blocked except the plan file. Explore the codebase and write your plan.`,
+            timestamp: Date.now(),
+          }
+          setState((prev: any) => ({
+            ...prev,
+            messages: [...prev.messages, planMsg],
+          }))
+          return
+        }
+      }
+    }
 
     setLoading(true)
     setError(null)
@@ -313,6 +405,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         initialMessages: conversationHistory,
         openaiTools: OPENAI_TOOLS,
         thinkingConfig: { type: 'enabled' },
+        planMode: permissionManager.getMode() === 'plan',
         onThinkingChunk: (reasoning) => {
           setThinkingContent(prev => prev + reasoning)
         },
@@ -380,7 +473,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
           const toolMsg: any = {
             id: toolMsgId,
             type: 'tool' as const,
-            content: `[${step.toolUse?.name || 'tool'}: ${step.toolResult || ''}]`,
+            content: `[${step.toolUse?.name || 'tool'}]`,
             timestamp: Date.now(),
             toolCallId: step.toolCallId,
           }
@@ -438,6 +531,13 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         setState((prev: any) => ({
           ...prev,
           messages: [...prev.messages, ...newAppMessages],
+          permissionMode: permissionManager.getMode(),
+        }))
+      } else {
+        // Sync permissionMode even if no new messages (plan mode may have changed)
+        setState((prev: any) => ({
+          ...prev,
+          permissionMode: permissionManager.getMode(),
         }))
       }
     } catch (e) {
@@ -483,11 +583,25 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         ready={ready}
         thinkingExpanded={thinkingExpanded}
         onToggleThinking={() => setThinkingExpanded(e => !e)}
+        permissionMode={permissionMode}
       />
       {pendingPermission && (
         <PermissionConfirm
           request={pendingPermission}
           onResponse={(response) => handlePermissionResponse(response.allowed)}
+        />
+      )}
+      {planApprovalPending && (
+        <PlanApprovalDialog
+          plan={planApprovalPending.plan}
+          onApprove={(feedback) => {
+            planApprovalPending.approve(feedback)
+            setPlanApprovalPending(null)
+          }}
+          onReject={(feedback) => {
+            planApprovalPending.reject(feedback)
+            setPlanApprovalPending(null)
+          }}
         />
       )}
     </>
