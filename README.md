@@ -2,7 +2,7 @@
 
 A from-scratch implementation of [Claude Code](https://claude.ai/code) CLI, built as a learning vehicle to deeply understand how AI coding agents work under the hood.
 
-**Stack:** Bun + Ink (React terminal UI) + NVIDIA API (Qwen3)
+**Stack:** Bun + Ink (React terminal UI) + DeepSeek API (NVIDIA also supported)
 
 ## Quick Start
 
@@ -19,6 +19,9 @@ bun run dev
 
 # Or send a one-shot message
 bun run chat "explain this project structure"
+
+# Enter plan mode (or the model may call EnterPlanMode tool itself)
+# In the REPL: type /plan "your task description"
 ```
 
 Requirements: Bun >= 1.2.0
@@ -87,9 +90,11 @@ src/
 │   ├── PromptInput.tsx       # Raw mode stdin handler (useReducer + IME fix)
 │   ├── messages/Messages.tsx # Message list with tool call cleanup
 │   ├── ThinkingMessage.tsx   # Collapsible thinking display
-│   └── PermissionConfirm.tsx # Permission dialog with keyboard navigation
+│   ├── PermissionConfirm.tsx # Permission dialog with keyboard navigation
+│   └── PlanApprovalDialog.tsx # Plan review dialog with cursor-aware feedback input
 ├── services/
-│   ├── api/deepseek.ts       # DeepSeekClient wrapping OpenAI SDK → NVIDIA API
+│   ├── api/deepseek.ts       # DeepSeekClient wrapping OpenAI SDK (DeepSeek/NVIDIA)
+│   ├── plans.ts              # Plan file creation, approval handler, slug generation
 │   ├── queryLoop.ts          # Core: async generator LLM ↔ tool execution loop
 │   ├── toolOrchestration.ts  # Parallel/serial tool execution with semaphore
 │   ├── permissions.ts        # Permission rules, modes, readonly heuristics
@@ -98,7 +103,7 @@ src/
 │   ├── paths.ts              # Shared path utilities (~/.myclaude/ namespace)
 │   ├── memory.ts             # Persistent memory system (MEMORY.md index)
 │   └── claudemd.ts           # CLAUDE.md discovery and loading
-├── tools/index.ts            # Tool definitions: Bash, Read, Write, Glob, Grep, Calculate
+├── tools/index.ts            # Tool definitions: Bash, Read, Write, Edit, Glob, Grep, Calculate, EnterPlanMode, ExitPlanMode
 ├── state/
 │   ├── store.ts              # Minimal external store (Zustand-like)
 │   ├── AppStateStore.ts      # AppState + Message types
@@ -116,8 +121,10 @@ learn/topics/                 # Deep-dive learning documents
 - **Session resume** — `--continue` restores the most recent session, `--resume <id>` picks a specific one
 - **PID process registry** — `~/.myclaude/sessions/<pid>.json` tracks live sessions, orphans auto-cleaned
 - **Tool calls round-trip** — `tool_calls` and `tool_call_id` preserved in JSONL so resumed sessions feed the LLM correctly
-- **Streaming reasoning** — `reasoning_content` from Qwen3 models displayed in real-time
-- **Multi-turn tool loop** — LLM calls tools, sees results, calls more tools, up to 5 turns
+- **Plan mode** — `/plan` command or EnterPlanMode tool: read-only exploration phase, write plan to file, ExitPlanMode with approval dialog
+- **Plan approval dialog** — interactive feedback input with cursor navigation, review before implementation
+- **Streaming reasoning** — `reasoning_content` from DeepSeek thinking-mode models displayed in real-time
+- **Multi-turn tool loop** — LLM calls tools, sees results, calls more tools, no hard turn limit
 - **Permission system** — auto-allow readonly tools, ask for destructive ones, remember choices per session
 - **Static/dynamic prompt separation** — static rules (cacheable), dynamic context (per-session)
 - **CLAUDE.md loading** — project-level instructions injected as user context
