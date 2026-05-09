@@ -220,7 +220,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
   const [streamingContent, setStreamingContent] = useState('')
   const [thinkingContent, setThinkingContent] = useState('')
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
-  const [currentTool, setCurrentTool] = useState<string | null>(null)
+  const [activeTools, setActiveTools] = useState<string[]>([])
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const permissionResolveRef = useRef<((response: PermissionResponse) => void) | null>(null)
   const currentPermissionRef = useRef<{ toolName: string; toolInput: Record<string, any> } | null>(null)
@@ -396,16 +396,28 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
       let thinkingText = ''
       const newAppMessages: any[] = []
 
+      // Filter tools based on permission mode: don't offer EnterPlanMode if already
+      // in plan mode, don't offer ExitPlanMode if not in plan mode.
+      const isPlanMode = permissionManager.getMode() === 'plan'
+      const activeTools = isPlanMode
+        ? DEFAULT_TOOLS.filter(t => t.name !== 'EnterPlanMode')
+        : DEFAULT_TOOLS.filter(t => t.name !== 'ExitPlanMode')
+      const activeOpenaiTools = isPlanMode
+        ? OPENAI_TOOLS.filter(t => t.function.name !== 'EnterPlanMode')
+        : OPENAI_TOOLS.filter(t => t.function.name !== 'ExitPlanMode')
+
       const queryLoop = createQueryLoop({
         client: apiRef.current,
-        tools: DEFAULT_TOOLS,
+        tools: activeTools,
         systemPrompt,
         userContext,
-        maxTurns: 5,
+        // No explicit maxTurns — let the model decide when to stop (like Claude Code).
+        // The loop terminates naturally when the model returns text without tool calls,
+        // or on user abort / API error / context budget pressure.
         initialMessages: conversationHistory,
-        openaiTools: OPENAI_TOOLS,
+        openaiTools: activeOpenaiTools,
         thinkingConfig: { type: 'enabled' },
-        planMode: permissionManager.getMode() === 'plan',
+        getPlanPath: () => permissionManager.getMode() === 'plan' ? getCurrentPlanPath() : null,
         onThinkingChunk: (reasoning) => {
           setThinkingContent(prev => prev + reasoning)
         },
@@ -420,7 +432,15 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         },
       })
 
-      for await (const step of queryLoop) {
+      // Manual iteration to capture the return value (for max_turns detection)
+      let queryResult: Awaited<ReturnType<typeof queryLoop.next>> | null = null
+      while (true) {
+        const next = await queryLoop.next()
+        if (next.done) {
+          queryResult = next
+          break
+        }
+        const step = next.value
         if (step.type === 'thinking' && step.content) {
           thinkingText += (thinkingText ? '\n' : '') + step.content
           setThinkingContent(thinkingText)
@@ -467,36 +487,52 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             sessionId: sessionIdRef.current,
           }).catch(() => {})
         } else if (step.type === 'tool') {
-          setCurrentTool(step.toolUse?.name || null)
+          const toolName = step.toolUse?.name || 'tool'
 
-          const toolMsgId = randomUUID()
-          const toolMsg: any = {
-            id: toolMsgId,
-            type: 'tool' as const,
-            content: `[${step.toolUse?.name || 'tool'}]`,
-            timestamp: Date.now(),
-            toolCallId: step.toolCallId,
-          }
+          if (step.toolResult !== undefined) {
+            // Tool completed — remove one entry by name
+            setActiveTools(prev => {
+              const idx = prev.indexOf(toolName)
+              if (idx >= 0) {
+                const next = [...prev]
+                next.splice(idx, 1)
+                return next
+              }
+              return prev
+            })
 
-          newAppMessages.push(toolMsg)
-
-          appendEntry(cwd, sessionIdRef.current, {
-            type: 'tool_result',
-            message: {
-              role: 'tool',
-              content: step.toolResult || '',
-              tool_call_id: step.toolCallId,
-            },
-            uuid: toolMsgId,
-            parentUuid: null,
-            timestamp: new Date().toISOString(),
-            sessionId: sessionIdRef.current,
-            toolUseResult: {
-              toolName: step.toolUse?.name,
-              stdout: step.toolResult,
+            const toolMsgId = randomUUID()
+            const toolMsg: any = {
+              id: toolMsgId,
+              type: 'tool' as const,
+              content: `[${toolName}]`,
+              timestamp: Date.now(),
               toolCallId: step.toolCallId,
-            },
-          }).catch(() => {})
+            }
+
+            newAppMessages.push(toolMsg)
+
+            appendEntry(cwd, sessionIdRef.current, {
+              type: 'tool_result',
+              message: {
+                role: 'tool',
+                content: step.toolResult || '',
+                tool_call_id: step.toolCallId,
+              },
+              uuid: toolMsgId,
+              parentUuid: null,
+              timestamp: new Date().toISOString(),
+              sessionId: sessionIdRef.current,
+              toolUseResult: {
+                toolName: step.toolUse?.name,
+                stdout: step.toolResult,
+                toolCallId: step.toolCallId,
+              },
+            }).catch(() => {})
+          } else {
+            // Tool started — add to active list
+            setActiveTools(prev => [...prev, toolName])
+          }
         } else if (step.type === 'error') {
           newAppMessages.push({
             id: randomUUID(),
@@ -505,6 +541,18 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             timestamp: Date.now(),
           })
         }
+      }
+
+      // If the loop hit max turns without the model producing a final answer,
+      // let the user know the conversation was cut off.
+      if (queryResult?.value?.reason === 'max_turns') {
+        const turnCount = queryResult.value.turnCount as number
+        newAppMessages.push({
+          id: randomUUID(),
+          type: 'system' as const,
+          content: `Reached max turns (${turnCount}). The conversation was cut off. Try sending a follow-up message to continue.`,
+          timestamp: Date.now(),
+        })
       }
 
       // Attach thinking to the first assistant message that triggered tool calls
@@ -524,7 +572,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
       }
 
       setThinkingContent('')
-      setCurrentTool(null)
+      setActiveTools([])
 
       // Batch-update state with all new messages
       if (newAppMessages.length > 0) {
@@ -576,7 +624,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         messages={messages}
         streamingContent={streamingContent}
         thinkingContent={thinkingContent}
-        currentTool={currentTool}
+        activeTools={activeTools}
         isLoading={loading}
         error={error}
         onSendMessage={handleSend}

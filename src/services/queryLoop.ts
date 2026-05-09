@@ -19,6 +19,8 @@ export interface QueryLoopConfig {
   client: DeepSeekClient
   tools?: Tool[]
   maxTurns?: number
+  /** Per-request output token limit. Undefined = use API default. */
+  maxTokens?: number
   systemPrompt?: string | string[]
   initialMessages?: ChatMessage[]
   /** Injected as a synthetic first user message (wraps CLAUDE.md, date, etc.) */
@@ -29,8 +31,9 @@ export interface QueryLoopConfig {
   cwd?: string
   thinkingConfig?: ThinkingConfig
   onThinkingChunk?: (reasoning: string) => void
-  /** Whether plan mode is active — injects plan mode attachment into the prompt */
-  planMode?: boolean
+  /** Plan mode plan file path getter. Called every turn to dynamically check if plan mode is active
+   *  and what the plan file path is. Returns the path string if in plan mode, null otherwise. */
+  getPlanPath?: () => string | null
 }
 
 export interface QueryResult {
@@ -215,28 +218,37 @@ export async function getGitContext(cwd: string): Promise<string | null> {
 /** Static/dynamic boundary marker, same name as Claude Code for future compatibility */
 export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
 
-/** Full plan mode instructions — shown on turn 1 and every 5th turn. */
-const PLAN_MODE_ATTACHMENT = `Plan mode is active. You are in a READ-ONLY research phase. You CANNOT modify any project files or run Bash commands.
+/** Full plan mode instructions — shown on turn 1 and every 5th turn. Path is injected. */
+function planModeFullAttachment(planPath: string): string {
+  return `Plan mode is active. You are in a READ-ONLY research phase. You CANNOT modify any project files or run Bash commands.
+
+## The Plan File
+Your plan file is at: ${planPath}
+Use the Write tool to write your plan content to THIS FILE. Do NOT output the plan as conversation text — the user can only see what you write to the file.
 
 ## What you CAN do:
 - Read files (Read tool)
 - Search code (Glob tool for file names, Grep tool for file content)
-- Write to the plan file (Write/Edit tools, ONLY for ~/.myclaude/plans/*.md)
+- Write your plan to the plan file at ${planPath} using the Write tool (THIS IS THE ONLY FILE YOU MAY MODIFY)
 
 ## What you MUST do:
 1. **Explore** the codebase to understand the current architecture
 2. **Design** your implementation approach
-3. **Write** your plan to the plan file (this is the ONLY file you may modify)
+3. **Write** your plan to ${planPath} using the Write tool. Use Write(file_path="${planPath}", content="...your plan markdown..."). Do NOT just say what your plan is — actually call the Write tool.
 4. **Call ExitPlanMode** when your plan is ready for user review
 
 ## Important:
 - Do NOT make any edits to project files — you will be blocked
 - Do NOT run any Bash commands — you will be blocked
+- Your plan content MUST be written to the file, not spoken as text
 - Once you call ExitPlanMode, the user will review your plan and approve or request changes
 - After approval, plan mode will be lifted and you can implement your plan`
+}
 
 /** Short plan mode reminder — shown on intermediate turns to save tokens. */
-const PLAN_MODE_ATTACHMENT_SHORT = `Plan mode still active. Read-only except for the plan file (~/.myclaude/plans/*.md). Call ExitPlanMode when your plan is ready.`
+function planModeShortAttachment(planPath: string): string {
+  return `Plan mode still active. Plan file: ${planPath}. Use Write tool to write your plan to this file, then call ExitPlanMode.`
+}
 
 /** How often to show the full attachment vs the short reminder (every N turns). */
 const PLAN_MODE_FULL_ATTACHMENT_INTERVAL = 5
@@ -265,31 +277,46 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
   }
 
   let turnCount = 0
-  const maxTurns = config.maxTurns ?? 10
+  // No default limit — like Claude Code, let the model decide when to stop.
+  // maxTurns can be set explicitly via config to cap subagent/integration loops.
+  const maxTurns = config.maxTurns
   const thinkingConfig = config.thinkingConfig ?? DEFAULT_THINKING_CONFIG
   const thinkingEnabled = thinkingConfig.type !== 'disabled'
 
-  while (turnCount < maxTurns) {
+  while (true) {
     turnCount++
+
+    // If a hard turn limit was explicitly configured, enforce it
+    if (maxTurns && turnCount > maxTurns) {
+      return { reason: 'max_turns', turnCount }
+    }
 
     // Per-turn plan mode attachment — injected every turn so the model
     // doesn't "forget" it's in plan mode. Full instructions every N turns,
     // short reminder on intermediate turns (saves tokens).
-    const turnMessages = config.planMode
+    // Dynamic check via getPlanPath() — plan mode can be activated mid-loop
+    // by the EnterPlanMode tool, so we can't capture it at loop creation time.
+    const planPath = config.getPlanPath?.()
+    const turnMessages = planPath
       ? [
           {
             role: 'system' as const,
             content:
               turnCount % PLAN_MODE_FULL_ATTACHMENT_INTERVAL === 1
-                ? PLAN_MODE_ATTACHMENT
-                : PLAN_MODE_ATTACHMENT_SHORT,
+                ? planModeFullAttachment(planPath)
+                : planModeShortAttachment(planPath),
           },
           ...messages,
         ]
       : messages
 
     try {
-      const chatOptions: any = { messages: turnMessages, maxTokens: 1500 }
+      const chatOptions: any = {
+        messages: turnMessages,
+        // No hardcoded output limit — let the model/API use their defaults.
+        // Pass through if explicitly configured (e.g. for tight subagent loops).
+        ...(config.maxTokens !== undefined && { maxTokens: config.maxTokens }),
+      }
       if (config.openaiTools) {
         chatOptions.tools = config.openaiTools
         chatOptions.system = systemPromptStr
@@ -399,7 +426,8 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
 
       for await (const step of toolResultIter) {
         if (step.type === 'tool') {
-          // 工具开始执行，记录但不 yield 结果
+          // Tool started — yield so the UI can display it as active
+          yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any } }
           config.onMessage?.(`[tool] ${step.toolCall?.name}`, true)
         } else if (step.type === 'result') {
           yield { type: 'tool', toolUse: { name: step.toolCall!.name, input: step.toolCall!.input as any }, toolResult: step.result!, toolCallId: step.toolCall?.apiId }
@@ -427,6 +455,4 @@ export async function* createQueryLoop(config: QueryLoopConfig): AsyncGenerator<
       return { reason: 'error', turnCount, error: errMsg }
     }
   }
-
-  return { reason: 'max_turns', turnCount }
 }

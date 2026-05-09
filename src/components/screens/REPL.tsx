@@ -20,7 +20,8 @@ interface REPLProps {
   streamingContent?: string
   /** In-progress thinking from streaming — cleared when message is saved */
   thinkingContent?: string
-  currentTool?: string | null
+  /** Currently executing tool names */
+  activeTools?: string[]
   isLoading?: boolean
   error?: string | null
   onSendMessage?: (text: string) => void
@@ -36,7 +37,7 @@ export function REPL({
   messages,
   streamingContent = '',
   thinkingContent = '',
-  currentTool = null,
+  activeTools,
   isLoading = false,
   error,
   onSendMessage,
@@ -79,11 +80,11 @@ export function REPL({
         </Box>
       )}
 
-      {currentTool && (
+      {activeTools && activeTools.length > 0 && (
         <Box>
           <SpinnerGlyph color="yellow" interval={120} />
           <Text> </Text>
-          <Text color="yellow">Tool: {currentTool}</Text>
+          <Text color="yellow">Tools: {activeTools.join(' | ')}</Text>
         </Box>
       )}
 
@@ -93,7 +94,7 @@ export function REPL({
         </Box>
       )}
 
-      {isLoading && !thinkingContent && !currentTool && (
+      {isLoading && !thinkingContent && (!activeTools || activeTools.length === 0) && (
         <Box>
           <SpinnerGlyph color="yellow" interval={120} />
           <Text> </Text>

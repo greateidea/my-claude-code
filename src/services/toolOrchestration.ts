@@ -240,6 +240,11 @@ export async function* executeToolsConcurrently(
   // 阶段2: 并行执行已获授权的工具
   if (readyCalls.length === 0) return
 
+  // Yield tool-start for all concurrent calls upfront so the UI shows them all at once
+  for (const { call } of readyCalls) {
+    yield { type: 'tool', toolCall: call }
+  }
+
   const sem = new Semaphore(MAX_CONCURRENCY)
   const pendingCalls = [...readyCalls]
   const running: Array<{
@@ -250,7 +255,7 @@ export async function* executeToolsConcurrently(
   while (pendingCalls.length > 0 || running.length > 0) {
     while (pendingCalls.length > 0 && running.length < MAX_CONCURRENCY) {
       const { call } = pendingCalls.shift()!
-      
+
       const task = (async (): Promise<ToolExecutionStep> => {
         await sem.acquire()
         try {
@@ -272,7 +277,6 @@ export async function* executeToolsConcurrently(
     const doneIndex = running.findIndex(r => r.call.id === done.toolCall?.id)
     if (doneIndex >= 0) running.splice(doneIndex, 1)
 
-    yield { type: 'tool', toolCall: done.toolCall }
     yield done
   }
 }
