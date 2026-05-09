@@ -216,8 +216,25 @@ export function PromptInput({ onSubmit, disabled = false, onToggleThinking }: Pr
   }
 
   const { text, cursor } = state
-  const beforeCursor = text.slice(0, cursor)
-  const afterCursor = text.slice(cursor)
+  const chars = [...text]
+
+  // Build render segments: prefix + characters with cursor-highlighted char
+  const segments: Array<{ text: string; inverse?: boolean; bold?: boolean; color?: string }> = [
+    { text: '> ', bold: true, color: 'cyan' },
+  ]
+
+  for (let i = 0; i < chars.length; i++) {
+    if (i === cursor) {
+      segments.push({ text: chars[i]!, inverse: true })
+    } else {
+      segments.push({ text: chars[i]! })
+    }
+  }
+
+  // Cursor at end of text — show a blinking-like inverse space
+  if (cursor >= chars.length) {
+    segments.push({ text: ' ', inverse: true })
+  }
 
   return (
     <Box flexDirection="column">
@@ -225,19 +242,23 @@ export function PromptInput({ onSubmit, disabled = false, onToggleThinking }: Pr
         <Text color="dim">──</Text>
       </Box>
 
-      <Box>
-        <Text bold color="cyan">▸ </Text>
-        <Text color="white">{beforeCursor}</Text>
-        {cursor < text.length ? (
-          <Text bold inverse color="white">{afterCursor[0]}</Text>
-        ) : (
+      {text.length === 0 ? (
+        <Box>
+          <Text bold color="cyan">{'>'} </Text>
           <Text bold inverse> </Text>
-        )}
-        <Text color="white">{afterCursor.slice(1)}</Text>
-        {text.length === 0 ? (
           <Text dimColor> (type your message)</Text>
-        ) : null}
-      </Box>
+        </Box>
+      ) : (
+        <Box>
+          <Text wrap="wrap">
+            {segments.map((seg, i) => (
+              <Text key={i} inverse={seg.inverse} bold={seg.bold} color={seg.color}>
+                {seg.text}
+              </Text>
+            ))}
+          </Text>
+        </Box>
+      )}
 
       <Box>
         <Text dimColor>
