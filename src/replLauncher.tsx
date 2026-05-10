@@ -24,6 +24,8 @@ import {
   setPlanApprovalHandler,
   createPlanFile,
   getCurrentPlanPath,
+  getPendingImplementation,
+  clearPendingImplementation,
 } from './services/plans'
 
 function toolToOpenAI(tool: Tool): any {
@@ -227,12 +229,14 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
   const apiRef = useRef<DeepSeekClient | null>(null)
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(sessionId)
+  const handleSendRef = useRef<((text: string) => Promise<void>) | null>(null)
   const initialized = useRef(false)
 
   // Plan mode state
   const [planApprovalPending, setPlanApprovalPending] = useState<{
     plan: string
     approve: (feedback?: string) => void
+    clearContextApprove: (feedback?: string) => void
     reject: (feedback: string) => void
   } | null>(null)
 
@@ -243,6 +247,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         setPlanApprovalPending({
           plan,
           approve: (feedback) => resolve({ approved: true, feedback }),
+          clearContextApprove: (feedback) => resolve({ approved: true, feedback, clearContext: true }),
           reject: (feedback) => resolve({ approved: false, feedback }),
         })
       })
@@ -434,6 +439,8 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
 
       // Manual iteration to capture the return value (for max_turns detection)
       let queryResult: Awaited<ReturnType<typeof queryLoop.next>> | null = null
+      // Set when ExitPlanMode triggers clear context + auto mode
+      let clearContextPlan: { plan: string; feedback?: string } | null = null
       while (true) {
         const next = await queryLoop.next()
         if (next.done) {
@@ -502,10 +509,16 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             })
 
             const toolMsgId = randomUUID()
+            // For ExitPlanMode, include the result text in the UI so the user
+            // can see their own feedback and the approval/rejection status.
+            // Other tools just show their name to avoid cluttering the UI.
+            const toolDisplayContent = toolName === 'ExitPlanMode' && step.toolResult
+              ? `[ExitPlanMode] ${step.toolResult}`
+              : `[${toolName}]`
             const toolMsg: any = {
               id: toolMsgId,
               type: 'tool' as const,
-              content: `[${toolName}]`,
+              content: toolDisplayContent,
               timestamp: Date.now(),
               toolCallId: step.toolCallId,
             }
@@ -529,6 +542,15 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
                 toolCallId: step.toolCallId,
               },
             }).catch(() => {})
+
+            // Detect clear context + auto mode from ExitPlanMode
+            if (toolName === 'ExitPlanMode') {
+              const pending = getPendingImplementation()
+              if (pending) {
+                clearPendingImplementation()
+                clearContextPlan = pending
+              }
+            }
           } else {
             // Tool started — add to active list
             setActiveTools(prev => [...prev, toolName])
@@ -541,6 +563,57 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             timestamp: Date.now(),
           })
         }
+
+        // Exit the query loop when clear context + auto mode is requested.
+        // We break before feeding the ExitPlanMode result back to the model —
+        // the conversation will be replaced with a fresh implementation message.
+        if (clearContextPlan) break
+      }
+
+      // ---- Clear context + auto mode ----
+      // When the user selects "clear context and auto mode" in the plan approval
+      // dialog, we clear the conversation history and auto-send a fresh message
+      // with the plan and user feedback.
+      if (clearContextPlan) {
+        const { plan, feedback } = clearContextPlan
+        const implContent = feedback
+          ? `Implement the following plan:\n\n${plan}\n\nUser feedback: ${feedback}`
+          : `Implement the following plan:\n\n${plan}`
+
+        const implMsgId = randomUUID()
+        const implTimestamp = new Date().toISOString()
+
+        // Persist the implementation message
+        appendEntry(cwd, sessionIdRef.current, {
+          type: 'user',
+          message: { role: 'user', content: implContent },
+          uuid: implMsgId,
+          parentUuid: null,
+          timestamp: implTimestamp,
+          sessionId: sessionIdRef.current,
+        }).catch(() => {})
+
+        setThinkingContent('')
+        setActiveTools([])
+        setLoading(false)
+
+        setState((prev: any) => ({
+          ...prev,
+          messages: [{
+            id: implMsgId,
+            type: 'user' as const,
+            content: implContent,
+            timestamp: Date.now(),
+          }],
+          permissionMode: 'acceptEdits',
+        }))
+
+        // Auto-send after React processes the state update
+        setTimeout(() => {
+          handleSendRef.current?.(implContent)
+        }, 0)
+
+        return
       }
 
       // If the loop hit max turns without the model producing a final answer,
@@ -596,6 +669,11 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
     }
   }, [])
 
+  // Keep ref in sync so clear-context auto-send can call latest handleSend
+  useEffect(() => {
+    handleSendRef.current = handleSend
+  }, [handleSend])
+
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
@@ -632,6 +710,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
         thinkingExpanded={thinkingExpanded}
         onToggleThinking={() => setThinkingExpanded(e => !e)}
         permissionMode={permissionMode}
+        frozen={planApprovalPending !== null || pendingPermission !== null}
       />
       {pendingPermission && (
         <PermissionConfirm
@@ -644,6 +723,10 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
           plan={planApprovalPending.plan}
           onApprove={(feedback) => {
             planApprovalPending.approve(feedback)
+            setPlanApprovalPending(null)
+          }}
+          onClearContextAndAuto={(feedback) => {
+            planApprovalPending.clearContextApprove(feedback)
             setPlanApprovalPending(null)
           }}
           onReject={(feedback) => {

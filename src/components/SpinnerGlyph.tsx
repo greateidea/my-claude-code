@@ -16,9 +16,11 @@ interface SpinnerGlyphProps {
   color?: string
   /** ms between glyph changes, default 120 (matches Claude Code) */
   interval?: number
+  /** When false, freezes the current glyph (stops animation ticks) */
+  active?: boolean
 }
 
-export function SpinnerGlyph({ color = 'yellow', interval = 120 }: SpinnerGlyphProps) {
-  const frame = useAnimationFrame(interval)
+export function SpinnerGlyph({ color = 'yellow', interval = 120, active = true }: SpinnerGlyphProps) {
+  const frame = useAnimationFrame(interval, active)
   return <Text color={color}>{bounceGlyph(frame)}</Text>
 }

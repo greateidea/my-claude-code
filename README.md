@@ -91,7 +91,7 @@ src/
 │   ├── messages/Messages.tsx # Message list with tool call cleanup
 │   ├── ThinkingMessage.tsx   # Collapsible thinking display
 │   ├── PermissionConfirm.tsx # Permission dialog with keyboard navigation
-│   └── PlanApprovalDialog.tsx # Plan review dialog with cursor-aware feedback input
+│   └── PlanApprovalDialog.tsx # Plan review dialog with 3 options: proceed, clear context+auto, revise
 ├── services/
 │   ├── api/deepseek.ts       # DeepSeekClient wrapping OpenAI SDK (DeepSeek/NVIDIA)
 │   ├── plans.ts              # Plan file creation, approval handler, slug generation
@@ -122,7 +122,8 @@ learn/topics/                 # Deep-dive learning documents
 - **PID process registry** — `~/.myclaude/sessions/<pid>.json` tracks live sessions, orphans auto-cleaned
 - **Tool calls round-trip** — `tool_calls` and `tool_call_id` preserved in JSONL so resumed sessions feed the LLM correctly
 - **Plan mode** — `/plan` command or EnterPlanMode tool: read-only exploration phase, write plan to file, ExitPlanMode with approval dialog
-- **Plan approval dialog** — interactive feedback input with cursor navigation, review before implementation
+- **Plan approval dialog** — interactive feedback input with cursor navigation, three approval options: proceed, clear context + auto mode, or revise
+- **Clear context + auto mode** — wipes conversation history after plan approval, auto-sends a fresh `Implement the following plan:` message, switches to `acceptEdits` for unattended implementation
 - **Streaming reasoning** — `reasoning_content` from DeepSeek thinking-mode models displayed in real-time
 - **Multi-turn tool loop** — LLM calls tools, sees results, calls more tools, no hard turn limit
 - **Permission system** — auto-allow readonly tools, ask for destructive ones, remember choices per session

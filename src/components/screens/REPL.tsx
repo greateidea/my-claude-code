@@ -31,6 +31,8 @@ interface REPLProps {
   onToggleThinking?: () => void
   /** Current permission mode — shown in UI */
   permissionMode?: string
+  /** When true, freeze all animated spinners (e.g. during modal dialogs) */
+  frozen?: boolean
 }
 
 export function REPL({
@@ -45,6 +47,7 @@ export function REPL({
   thinkingExpanded,
   onToggleThinking,
   permissionMode,
+  frozen = false,
 }: REPLProps) {
   const handleSubmit = onSendMessage ?? (() => {})
 
@@ -70,7 +73,7 @@ export function REPL({
       {thinkingContent && (
         <Box flexDirection="column" marginLeft={2}>
           <Box>
-            <SpinnerGlyph color="yellow" interval={120} />
+            <SpinnerGlyph color="yellow" interval={120} active={!frozen} />
             <Text> </Text>
             <Text color="dim" dimColor>Thinking:</Text>
           </Box>
@@ -82,7 +85,7 @@ export function REPL({
 
       {activeTools && activeTools.length > 0 && (
         <Box>
-          <SpinnerGlyph color="yellow" interval={120} />
+          <SpinnerGlyph color="yellow" interval={120} active={!frozen} />
           <Text> </Text>
           <Text color="yellow">Tools: {activeTools.join(' | ')}</Text>
         </Box>
@@ -96,9 +99,9 @@ export function REPL({
 
       {isLoading && !thinkingContent && (!activeTools || activeTools.length === 0) && (
         <Box>
-          <SpinnerGlyph color="yellow" interval={120} />
+          <SpinnerGlyph color="yellow" interval={120} active={!frozen} />
           <Text> </Text>
-          <ShimmerText text="Thinking..." color="yellow" />
+          <ShimmerText text="Thinking..." color="yellow" active={!frozen} />
         </Box>
       )}
 

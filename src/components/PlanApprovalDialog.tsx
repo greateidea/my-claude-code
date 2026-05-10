@@ -5,6 +5,8 @@ import { inputReducer, type InputState } from './PromptInput'
 interface PlanApprovalDialogProps {
   plan: string
   onApprove: (feedback?: string) => void
+  /** Clear context + auto mode — clears conversation and auto-sends implementation message */
+  onClearContextAndAuto?: (feedback?: string) => void
   onReject: (feedback: string) => void
 }
 
@@ -33,6 +35,7 @@ function renderFeedbackInput(state: InputState): React.ReactNode[] {
 export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
   plan,
   onApprove,
+  onClearContextAndAuto,
   onReject,
 }) => {
   const [selected, setSelected] = useState(0)
@@ -41,6 +44,7 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
 
   const options = [
     { label: 'Yes, proceed with implementation', value: 'approve' as const },
+    { label: 'Yes, clear context and auto mode', value: 'clearContext' as const },
     { label: 'No, tell Claude what to change', value: 'reject' as const },
   ]
 
@@ -50,6 +54,8 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
         const text = feedbackState.text
         if (selected === 0) {
           onApprove(text || undefined)
+        } else if (selected === 1) {
+          onClearContextAndAuto?.(text || undefined)
         } else {
           onReject(text || 'Revise the plan')
         }
@@ -61,47 +67,32 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
         return
       }
 
-      // Backspace
-      if (_input === '\x7f' || _input === '\x08') { dispatch({ type: 'backspace' }); return }
+      // Ink 7 delivers parsed key events — use key.* properties, not raw escape sequences.
+      // For most special keys, _input is '' in Ink 7.
 
-      // Delete
-      if (_input === '\x1b[3~') { dispatch({ type: 'delete' }); return }
-
-      // Left arrow
-      if (_input === '\x1b[D') { dispatch({ type: 'move_left' }); return }
-
-      // Right arrow
-      if (_input === '\x1b[C') { dispatch({ type: 'move_right' }); return }
-
-      // Home
-      if (_input === '\x1b[H' || _input === '\x1b[1~' || _input === '\x1bOH') {
-        dispatch({ type: 'move_home' }); return
+      if (key.backspace) { dispatch({ type: 'backspace' }); return }
+      if (key.delete) { dispatch({ type: 'delete' }); return }
+      if (key.leftArrow) {
+        dispatch({ type: key.meta ? 'word_left' : 'move_left' }); return
       }
-
-      // End
-      if (_input === '\x1b[F' || _input === '\x1b[4~' || _input === '\x1bOF') {
-        dispatch({ type: 'move_end' }); return
+      if (key.rightArrow) {
+        dispatch({ type: key.meta ? 'word_right' : 'move_right' }); return
       }
+      if (key.home) { dispatch({ type: 'move_home' }); return }
+      if (key.end) { dispatch({ type: 'move_end' }); return }
 
-      // Option+Left — word left
+      // Option+Left/Right fallback — some terminals send raw escapes that Ink
+      // doesn't fully parse into key.meta + key.leftArrow.
       if (_input === '\x1b[1;2D' || _input === '\x1bb') { dispatch({ type: 'word_left' }); return }
-
-      // Option+Right — word right
       if (_input === '\x1b[1;2C' || _input === '\x1bf') { dispatch({ type: 'word_right' }); return }
 
-      // Ctrl+A — move to start
-      if (_input === '\x01') { dispatch({ type: 'move_home' }); return }
+      // Ctrl key combinations (Ink 7 passes the control character as _input)
+      if (_input === '\x01') { dispatch({ type: 'move_home' }); return }   // Ctrl+A
+      if (_input === '\x05') { dispatch({ type: 'move_end' }); return }    // Ctrl+E
+      if (_input === '\x0b') { dispatch({ type: 'kill_to_end' }); return } // Ctrl+K
+      if (_input === '\x15') { dispatch({ type: 'kill_to_start' }); return } // Ctrl+U
 
-      // Ctrl+E — move to end
-      if (_input === '\x05') { dispatch({ type: 'move_end' }); return }
-
-      // Ctrl+K — kill to end
-      if (_input === '\x0b') { dispatch({ type: 'kill_to_end' }); return }
-
-      // Ctrl+U — kill to start
-      if (_input === '\x15') { dispatch({ type: 'kill_to_start' }); return }
-
-      // Filter other escape sequences
+      // Filter other escape sequences (not printable)
       if (_input && _input.startsWith('\x1b')) return
 
       // Printable character
@@ -121,7 +112,7 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
     }
     if (key.return) {
       const option = options[selected]
-      if (option.value === 'reject') {
+      if (option.value === 'reject' || option.value === 'clearContext') {
         setInputMode(true)
       } else {
         onApprove()

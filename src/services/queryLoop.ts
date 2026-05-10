@@ -234,7 +234,10 @@ Use the Write tool to write your plan content to THIS FILE. Do NOT output the pl
 ## What you MUST do:
 1. **Explore** the codebase to understand the current architecture
 2. **Design** your implementation approach
-3. **Write** your plan to ${planPath} using the Write tool. Use Write(file_path="${planPath}", content="...your plan markdown..."). Do NOT just say what your plan is — actually call the Write tool.
+3. **Write** your plan — either:
+   a) Use the Write tool to write to ${planPath}, OR
+   b) Pass your plan as the planContent parameter to ExitPlanMode (e.g., ExitPlanMode(planContent="# Your plan..."))
+   Do NOT just say what your plan is as conversation text — the user can only review plans that are written to the file or passed as a parameter.
 4. **Call ExitPlanMode** when your plan is ready for user review
 
 ## Important:
@@ -247,7 +250,7 @@ Use the Write tool to write your plan content to THIS FILE. Do NOT output the pl
 
 /** Short plan mode reminder — shown on intermediate turns to save tokens. */
 function planModeShortAttachment(planPath: string): string {
-  return `Plan mode still active. Plan file: ${planPath}. Use Write tool to write your plan to this file, then call ExitPlanMode.`
+  return `Plan mode still active. Plan file: ${planPath}. Write your plan via Write tool or pass it as planContent parameter to ExitPlanMode.`
 }
 
 /** How often to show the full attachment vs the short reminder (every N turns). */

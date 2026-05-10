@@ -115,7 +115,14 @@ export function clearCurrentPlan(): void {
 
 // ---- Plan approval handler (set by replLauncher) ----
 
-type PlanApprovalHandler = (plan: string) => Promise<{ approved: boolean; feedback?: string }>
+export interface PlanApprovalResult {
+  approved: boolean
+  feedback?: string
+  /** When true, replLauncher clears conversation context and auto-sends implementation message */
+  clearContext?: boolean
+}
+
+type PlanApprovalHandler = (plan: string) => Promise<PlanApprovalResult>
 
 let _planApprovalHandler: PlanApprovalHandler | null = null
 
@@ -125,4 +132,21 @@ export function setPlanApprovalHandler(handler: PlanApprovalHandler): void {
 
 export function getPlanApprovalHandler(): PlanApprovalHandler | null {
   return _planApprovalHandler
+}
+
+// ---- Pending implementation (clear context + auto mode) ----
+
+let _pendingImplementation: { plan: string; feedback?: string } | null = null
+
+/** Store plan for replLauncher to pick up after ExitPlanMode tool result. */
+export function setPendingImplementation(plan: string, feedback?: string): void {
+  _pendingImplementation = { plan, feedback }
+}
+
+export function getPendingImplementation(): { plan: string; feedback?: string } | null {
+  return _pendingImplementation
+}
+
+export function clearPendingImplementation(): void {
+  _pendingImplementation = null
 }

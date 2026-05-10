@@ -9,6 +9,8 @@ interface ShimmerTextProps {
   width?: number
   /** ms per sweep step */
   speed?: number
+  /** When false, freezes the shimmer (stops animation ticks) */
+  active?: boolean
 }
 
 /**
@@ -21,8 +23,8 @@ interface ShimmerTextProps {
  * Color scheme: highlighted chars get bold amber, others get dim yellow —
  * avoids the harsh pure-white inverse that clashes with TUI aesthetics.
  */
-export function ShimmerText({ text, color = 'yellow', width = 3, speed = 80 }: ShimmerTextProps) {
-  const frame = useAnimationFrame(speed)
+export function ShimmerText({ text, color = 'yellow', width = 3, speed = 80, active = true }: ShimmerTextProps) {
+  const frame = useAnimationFrame(speed, active)
 
   return (
     <Text>
