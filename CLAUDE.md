@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-A custom implementation of Claude Code CLI in ~500 LOC, built with Bun + Ink (React for terminal UI) + NVIDIA API. The app is a terminal REPL that chats with an LLM and executes tools (bash, file read/write, glob) via an async generator query loop.
+Your name is "My Claude", a custom implementation of Claude Code CLI in ~500 LOC, built with Bun + Ink (React for terminal UI) + NVIDIA API. The app is a terminal REPL that chats with an LLM and executes tools (bash, file read/write, web search, web fetch, glob/grep, edit) via an async generator query loop.
 
 ## Conventions
 
@@ -53,7 +53,21 @@ src/
 │   ├── store.ts            # Minimal Zustand-style store (getState/setState/subscribe)
 │   ├── AppStateStore.ts    # AppState type + Message type
 │   └── AppState.tsx        # React context provider + useAppState/useSetAppState hooks
-├── tools/index.ts          # Tool definitions (Bash, Read, Write, Glob, Calculate) with zod schemas
+├── tools/
+│   ├── index.ts              # Tool registry (re-exports, AVAILABLE_TOOLS)
+│   ├── types.ts              # Tool interface + helpers (readOnlyTool, writeTool)
+│   ├── bash.ts / read.ts / write.ts / edit.ts  # Core file tools
+│   ├── glob.ts / grep.ts     # File search tools
+│   ├── calculate.ts          # Math expression evaluator
+│   ├── enterPlanMode.ts / exitPlanMode.ts  # Plan mode lifecycle
+│   ├── websearch/            # WebSearch: Bing scraping (no API key)
+│   │   ├── index.ts          # WebSearchTool definition
+│   │   ├── bing.ts           # Bing HTML parser + redirect resolver
+│   │   └── types.ts          # SearchResult, SearchOptions
+│   └── webfetch/             # WebFetch: URL fetch + AI summarization
+│       ├── index.ts          # WebFetchTool definition
+│       ├── utils.ts          # HTTP fetch, turndown, cache, AI summarize
+│       └── preapproved.ts    # ~80 preapproved developer domains
 └── bootstrap/state.ts      # Session initialization (UUID, project root stub)
 ```
 
@@ -68,6 +82,10 @@ src/
 **Permissions**: `PermissionManager` classifies tools as readonly (auto-allow), checks against allow/deny/ask rules, supports modes (`default`, `acceptEdits`, `plan`, `dontAsk`), and bash heuristic (known readonly commands auto-allowed).
 
 **API client** (`services/api/deepseek.ts`): Wraps OpenAI SDK pointing at `https://integrate.api.nvidia.com/v1`. Default model: `nvidia/nemotron-3-super-120b-a12b`. Supports streaming with reasoning content extraction.
+
+**WebSearch** (`tools/websearch/`): Scrapes Bing search result pages (no API key required). HTML regex parsing of `<li class="b_algo">` blocks, base64url redirect URL resolution, three-tier snippet extraction, client-side domain allow/block filtering.
+
+**WebFetch** (`tools/webfetch/`): Fetches URLs and converts HTML to Markdown via `turndown`. AI summarization via DeepSeekClient. 15-min TTL cache (self-managed Map), manual redirect handling (same-host only).
 
 ## Environment
 

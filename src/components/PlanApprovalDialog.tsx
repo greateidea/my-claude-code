@@ -45,7 +45,7 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
   const options = [
     { label: 'Yes, proceed with implementation', value: 'approve' as const },
     { label: 'Yes, clear context and auto mode', value: 'clearContext' as const },
-    { label: 'No, tell Claude what to change', value: 'reject' as const },
+    { label: 'No, tell MyClaude what to change', value: 'reject' as const },
   ]
 
   useInput((_input, key) => {
@@ -146,7 +146,7 @@ export const PlanApprovalDialog: React.FC<PlanApprovalDialogProps> = ({
 
       {inputMode ? (
         <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor>Tell Claude what to change:</Text>
+          <Text dimColor>Tell MyClaude what to change:</Text>
           <Box>
             <Text color="yellow">▸ </Text>
             <Text wrap="wrap">

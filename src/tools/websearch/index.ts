@@ -18,7 +18,7 @@ const bingAdapter = new BingSearchAdapter()
 
 export const WebSearchTool: Tool = {
   name: 'WebSearch',
-  description: `- Allows Claude to search the web and use the results to inform responses
+  description: `- Allows MyClaude to search the web and use the results to inform responses
 - Provides up-to-date information for current events and recent data
 - Returns search result information formatted as search result blocks, including links as markdown hyperlinks
 - Use this tool for accessing information beyond Claude's knowledge cutoff
@@ -38,7 +38,7 @@ CRITICAL REQUIREMENT - You MUST follow this:
 
 Usage notes:
   - Domain filtering is supported to include or block specific websites
-  - Web search is only available in the US`,
+  - Web search is only available in the US and CN`,
 
   inputSchema: {
     query: z.string().min(2).describe('The search query to use'),

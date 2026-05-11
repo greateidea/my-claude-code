@@ -28,7 +28,7 @@ Requirements: Bun >= 1.2.0
 
 ## What It Does
 
-You type messages in a terminal. The LLM reasons, calls tools (bash, file read/write, glob search), sees results, and responds — in a loop until the task is done.
+You type messages in a terminal. The LLM reasons, calls tools (bash, file read/write, web search, web fetch, glob/grep search, edit), sees results, and responds — in a loop until the task is done.
 
 ```
 You: list all TypeScript files and count lines
@@ -103,7 +103,21 @@ src/
 │   ├── paths.ts              # Shared path utilities (~/.myclaude/ namespace)
 │   ├── memory.ts             # Persistent memory system (MEMORY.md index)
 │   └── claudemd.ts           # CLAUDE.md discovery and loading
-├── tools/index.ts            # Tool definitions: Bash, Read, Write, Edit, Glob, Grep, Calculate, EnterPlanMode, ExitPlanMode
+├── tools/
+│   ├── index.ts              # Tool registry (re-exports, AVAILABLE_TOOLS)
+│   ├── types.ts              # Tool interface + helpers (readOnlyTool, writeTool)
+│   ├── bash.ts / read.ts / write.ts / edit.ts  # Core file tools
+│   ├── glob.ts / grep.ts     # File search tools
+│   ├── calculate.ts          # Math expression evaluator
+│   ├── enterPlanMode.ts / exitPlanMode.ts  # Plan mode lifecycle
+│   ├── websearch/            # WebSearch: Bing scraping (no API key required)
+│   │   ├── index.ts          # WebSearchTool definition
+│   │   ├── bing.ts           # Bing HTML parser + redirect resolver
+│   │   └── types.ts          # SearchResult, SearchOptions interfaces
+│   └── webfetch/             # WebFetch: URL fetch + AI summarization
+│       ├── index.ts          # WebFetchTool definition
+│       ├── utils.ts          # HTTP fetch, turndown, cache, AI summarization
+│       └── preapproved.ts    # ~80 preapproved developer domains
 ├── state/
 │   ├── store.ts              # Minimal external store (Zustand-like)
 │   ├── AppStateStore.ts      # AppState + Message types
@@ -130,6 +144,8 @@ learn/topics/                 # Deep-dive learning documents
 - **Static/dynamic prompt separation** — static rules (cacheable), dynamic context (per-session)
 - **CLAUDE.md loading** — project-level instructions injected as user context
 - **Git context** — branch, status, recent commits snapshotted at conversation start
+- **Web search** — scrapes Bing search results (no API key), resolves redirect URLs, client-side domain filtering
+- **Web fetch** — fetches any URL, converts HTML to Markdown via turndown, AI-powered content summarization, 15-min TTL cache
 - **Memory system** — type-based persistent memory (user/feedback/project/reference) with MEMORY.md indexing
 - **IME-aware input** — CJK multi-character commit handled correctly via `useReducer`
 - **Terminal animations** — bounce-glyph spinner, shimmer text sweep (setInterval-based, ~8fps)
