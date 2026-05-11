@@ -17,7 +17,6 @@ import {
   getURLMarkdownContent,
   applyPromptToMarkdown,
   RedirectError,
-  MAX_MARKDOWN_LENGTH,
   validateURL,
 } from './utils'
 import { isPreapprovedUrl } from './preapproved'
@@ -64,23 +63,19 @@ Usage notes:
       const fetched = await getURLMarkdownContent(url, controller)
       const durationMs = Date.now() - startTime
 
-      let result: string
+      // Always apply the user's prompt via AI. The isPreapproved flag only
+      // affects the summarization guidelines:
+      //   - Preapproved (docs sites, GitHub, etc.): can quote code/docs freely
+      //   - Non-preapproved (random websites): strict 125-char quote limit
+      // This distinction prevents copyright issues when fetching arbitrary sites.
+      const aiResult = await applyPromptToMarkdown(
+        prompt,
+        fetched.content,
+        controller.signal,
+        isPreapproved,
+      )
 
-      // For preapproved domains with small markdown content, use directly
-      if (isPreapproved && fetched.content.length <= MAX_MARKDOWN_LENGTH) {
-        result = `Content from ${url}:\n\n${fetched.content}`
-      } else {
-        // Apply the user's prompt to the markdown content via AI
-        const aiResult = await applyPromptToMarkdown(
-          prompt,
-          fetched.content,
-          controller.signal,
-          isPreapproved,
-        )
-        result = aiResult
-      }
-
-      return `${result}\n\n---\nFetched: ${url} | HTTP ${fetched.code} | ${(durationMs / 1000).toFixed(2)}s | ${(fetched.bytes / 1024).toFixed(1)}KB`
+      return `${aiResult}\n\n---\nFetched: ${url} | HTTP ${fetched.code} | ${(durationMs / 1000).toFixed(2)}s | ${(fetched.bytes / 1024).toFixed(1)}KB`
     } catch (e: any) {
       if (e instanceof RedirectError) {
         return `Redirect detected: The URL ${url} redirects to ${e.redirectUrl}. Please make a new WebFetch request with the redirect URL: ${e.redirectUrl}`
