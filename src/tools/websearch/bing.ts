@@ -31,7 +31,7 @@ const BROWSER_HEADERS: Record<string, string> = {
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
   'Accept':
     'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Language': 'en-US,en,cn;q=0.9',
   'Accept-Encoding': 'gzip, deflate, br',
   'Cache-Control': 'no-cache',
   'Pragma': 'no-cache',
@@ -51,7 +51,7 @@ const BROWSER_HEADERS: Record<string, string> = {
  * Decode common HTML named entities and numeric entities.
  * Handles the subset found in Bing search results without needing the `he` package.
  */
-function decodeHtmlEntities(text: string): string {
+export function decodeHtmlEntities(text: string): string {
   return text
     // Numeric entities: &#39; &#x27; &#1234; etc.
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
@@ -88,7 +88,7 @@ function decodeHtmlEntities(text: string): string {
  *
  * Returns undefined for Bing-internal or relative links that should be skipped.
  */
-function resolveBingUrl(rawUrl: string): string | undefined {
+export function resolveBingUrl(rawUrl: string): string | undefined {
   // Skip relative / anchor / Bing-internal links
   if (rawUrl.startsWith('/') || rawUrl.startsWith('#')) return undefined
 
