@@ -11,6 +11,8 @@ export { GrepTool } from './grep'
 export { CalculateTool } from './calculate'
 export { EnterPlanModeTool } from './enterPlanMode'
 export { ExitPlanModeTool } from './exitPlanMode'
+export { WebSearchTool } from './websearch'
+export { WebFetchTool } from './webfetch'
 
 import { type Tool } from './types'
 import { BashTool } from './bash'
@@ -22,6 +24,8 @@ import { GrepTool } from './grep'
 import { CalculateTool } from './calculate'
 import { EnterPlanModeTool } from './enterPlanMode'
 import { ExitPlanModeTool } from './exitPlanMode'
+import { WebSearchTool } from './websearch'
+import { WebFetchTool } from './webfetch'
 
 export const AVAILABLE_TOOLS = [
   CalculateTool,
@@ -33,6 +37,8 @@ export const AVAILABLE_TOOLS = [
   GrepTool,
   EnterPlanModeTool,
   ExitPlanModeTool,
+  WebSearchTool,
+  WebFetchTool,
 ]
 
 export function findToolByName(tools: Tool[], name: string): Tool | undefined {
