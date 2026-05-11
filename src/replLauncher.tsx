@@ -514,7 +514,7 @@ function App({ initialPrompt, sessionId, initialHistory }: AppProps) {
             // Other tools just show their name to avoid cluttering the UI.
             const toolDisplayContent = toolName === 'ExitPlanMode' && step.toolResult
               ? `[ExitPlanMode] ${step.toolResult}`
-              : `[${toolName}]`
+              : `[${toolName}: ${JSON.stringify(step?.toolUse?.input) || '-/-'}]`
             const toolMsg: any = {
               id: toolMsgId,
               type: 'tool' as const,

@@ -76,3 +76,8 @@ Requires Bun >= 1.2.0. Set `NVIDIA_API_KEY` or `DEEPSEEK_API_KEY` in `.env` (cop
 ## Testing
 
 Tests live in `tests/` as standalone `.ts` scripts that import from `./src/...` (Bun resolves via `--env-file`). Each test instantiates `DeepSeekClient` and exercises `createQueryLoop()` directly — no mocking. Run individually with `bun run tests/test-chat.ts`.
+
+## Claude Code Source Code Path
+The 【Claude Code】 source code is stored in path: "~/nodecode/claude-code"。When it is necessary to research the Claude Code source code, go to that path to access the source code.
+
+
